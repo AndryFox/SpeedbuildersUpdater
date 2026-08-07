@@ -3,6 +3,18 @@ from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
 import os
 from dotenv import load_dotenv
+import io
+from PIL import Image
+import pytesseract
+import sys
+
+# --- CONFIGURAZIONE OCR MULTI-PIATTAFORMA ---
+if sys.platform == 'win32':
+    # Se il bot rileva che è su Windows (il tuo PC), usa questo percorso:
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+else:
+    # Su Linux (Render), il sistema sa già dove si trova una volta installato
+    pass
 
 # --- SEZIONE PER MANTENERE IL BOT ATTIVO SU RENDER ---
 from flask import Flask
@@ -15,16 +27,13 @@ def home():
     return "Bot Online!"
 
 def run():
-    # Render assegna automaticamente una porta nella variabile d'ambiente PORT
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
-    # Avvia il server web in un thread separato per non bloccare il bot di Discord
     t = Thread(target=run)
     t.start()
 
-# Avvia il server web anti-sospensione
 keep_alive()
 # ----------------------------------------------------
 
@@ -38,11 +47,11 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- ID REALI ---
-REVIEW_CHANNEL_ID = 1535055543033532467    # ID del canale di revisione 
-UPDATES_CHANNEL_ID = 1092204135505461349   # ID del canale finale 
-ADMIN_ID = 715247279141027890              # ID Admin per i DM
-MIO_ID = 715247279141027890                # ID per il tag
-SUBMISSION_CHANNEL_ID = 1300032038165938176 # SOSTITUISCI CON L'ID DI #pb-share
+REVIEW_CHANNEL_ID = 1535055543033532467    
+UPDATES_CHANNEL_ID = 1535055543033532467   
+ADMIN_ID = 715247279141027890              
+MIO_ID = 715247279141027890                
+SUBMISSION_CHANNEL_ID = 123456789012345678 # ID di #pb-share
 
 # 3. Finestra di compilazione (Modal)
 class WRModal(Modal, title='Aggiornamento World Record'):
@@ -56,18 +65,14 @@ class WRModal(Modal, title='Aggiornamento World Record'):
         self.original_view = original_view
 
     async def on_submit(self, interaction: discord.Interaction):
-        # 1. Spegne i tasti della View
         for child in self.original_view.children:
             child.disabled = True
             
-        # 2. Disabilita i tasti a schermo in modo istantaneo e chiude la finestra
         await interaction.response.edit_message(view=self.original_view)
         
-        # 3. Manda il messaggio nel canale finale con il blocco di codice scuro
         channel = bot.get_channel(UPDATES_CHANNEL_ID)
         testo_record = f'```\n{self.build_name.value} : {self.time_val.value} - {self.player_name.value}\n```'
         
-        # 4. Scarica e invia il file nativo per nascondere l'URL testuale
         file_da_inviare = await self.attachment.to_file()
         await channel.send(content=testo_record, file=file_da_inviare)
 
@@ -80,21 +85,17 @@ class ReviewView(View):
 
     @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
     async def accept_btn(self, interaction: discord.Interaction, button: Button):
-        # Apre il modal passandogli l'allegato
         await interaction.response.send_modal(WRModal(self.attachment, self))
 
     @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger)
     async def reject_btn(self, interaction: discord.Interaction, button: Button):
-        # Spegne subito i tasti 
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(view=self)
         
-        # Invia l'immagine nei tuoi DM
         admin_user = await bot.fetch_user(ADMIN_ID)
         await admin_user.send(f"Hai rifiutato questo screen inviato da {self.original_author.mention}:\n{self.attachment.url}")
         
-        # Conferma visibile solo a te
         await interaction.followup.send("Wr rifiutato. Lo screen è stato salvato in DM.", ephemeral=True)
 
 # 5. Evento principale di ascolto messaggi
@@ -103,7 +104,6 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Se il messaggio NON è nel canale scelto, il bot lo ignora e passa ad altro
     if message.channel.id != SUBMISSION_CHANNEL_ID:
         await bot.process_commands(message)
         return
@@ -115,18 +115,36 @@ async def on_message(message):
         review_channel = bot.get_channel(REVIEW_CHANNEL_ID)
         
         for attachment in message.attachments:
-            view = ReviewView(attachment, message.author)
+            is_valid_submission = False
             
-            # Usiamo to_file() anche per il canale di revisione
-            file_review = await attachment.to_file()
+            # Controlla se è un'immagine
+            if attachment.content_type and attachment.content_type.startswith('image/'):
+                # Scarica l'immagine in memoria (senza salvarla sul disco)
+                image_bytes = await attachment.read()
+                img = Image.open(io.BytesIO(image_bytes))
+                
+                # Applica l'OCR per estrarre il testo e convertilo in minuscolo
+                testo_estratto = pytesseract.image_to_string(img).lower()
+                
+                # Controlla le parole chiave della scoreboard di Fear Games
+                if "speedbuilders" in testo_estratto or "costruzione" in testo_estratto:
+                    is_valid_submission = True
             
-            await review_channel.send(
-                content=f"New world record from {message.author.mention}",
-                file=file_review,
-                view=view
-            )
-            
-        await message.channel.send(f"{message.author.mention}, your world record has been sent for review!", delete_after=10)
+            # Se è un video, lo accettiamo a prescindere per la revisione manuale
+            elif attachment.content_type and attachment.content_type.startswith('video/'):
+                is_valid_submission = True
+                
+            # Se è valido, crea i tasti e manda in revisione
+            if is_valid_submission:
+                view = ReviewView(attachment, message.author)
+                file_review = await attachment.to_file()
+                
+                await review_channel.send(
+                    content=f"New world record from {message.author.mention}:",
+                    file=file_review,
+                    view=view
+                )
+                await message.channel.send(f"{message.author.mention}, your world record has been sent for review!", delete_after=5)
 
     await bot.process_commands(message)
 
