@@ -38,10 +38,11 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- ID REALI ---
-REVIEW_CHANNEL_ID = 1535055543033532467  # ID del canale di revisione 
-UPDATES_CHANNEL_ID = 1535055543033532467 # ID del canale finale 
-ADMIN_ID = 715247279141027890            # ID Admin per i DM
-MIO_ID = 715247279141027890              # ID per il tag
+REVIEW_CHANNEL_ID = 1535055543033532467    # ID del canale di revisione 
+UPDATES_CHANNEL_ID = 1535055543033532467   # ID del canale finale 
+ADMIN_ID = 715247279141027890              # ID Admin per i DM
+MIO_ID = 715247279141027890                # ID per il tag
+SUBMISSION_CHANNEL_ID = 123456789012345678 # SOSTITUISCI CON L'ID DI #pb-share
 
 # 3. Finestra di compilazione (Modal)
 class WRModal(Modal, title='Aggiornamento World Record'):
@@ -100,6 +101,11 @@ class ReviewView(View):
 @bot.event
 async def on_message(message):
     if message.author.bot:
+        return
+
+    # Se il messaggio NON è nel canale scelto, il bot lo ignora e passa ad altro
+    if message.channel.id != SUBMISSION_CHANNEL_ID:
+        await bot.process_commands(message)
         return
 
     has_media = len(message.attachments) > 0
