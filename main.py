@@ -39,10 +39,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- ID REALI ---
 REVIEW_CHANNEL_ID = 1535055543033532467    # ID del canale di revisione 
-UPDATES_CHANNEL_ID = 1535055543033532467   # ID del canale finale 
+UPDATES_CHANNEL_ID = 1092204135505461349   # ID del canale finale 
 ADMIN_ID = 715247279141027890              # ID Admin per i DM
 MIO_ID = 715247279141027890                # ID per il tag
-SUBMISSION_CHANNEL_ID = 123456789012345678 # SOSTITUISCI CON L'ID DI #pb-share
+SUBMISSION_CHANNEL_ID = 1300032038165938176 # SOSTITUISCI CON L'ID DI #pb-share
 
 # 3. Finestra di compilazione (Modal)
 class WRModal(Modal, title='Aggiornamento World Record'):
@@ -121,12 +121,12 @@ async def on_message(message):
             file_review = await attachment.to_file()
             
             await review_channel.send(
-                content=f"New world record from {message.author.mention}:",
+                content=f"New world record from {message.author.mention}",
                 file=file_review,
                 view=view
             )
             
-        await message.channel.send(f"{message.author.mention}, your world record has been sent for review!", delete_after=5)
+        await message.channel.send(f"{message.author.mention}, your world record has been sent for review!", delete_after=10)
 
     await bot.process_commands(message)
 
