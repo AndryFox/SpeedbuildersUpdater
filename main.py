@@ -2,19 +2,7 @@ import discord
 from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
 import os
-import json
 from dotenv import load_dotenv
-
-# --- FUNZIONI PER GESTIRE I RECORD ---
-def load_records():
-    if os.path.exists("records.json"):
-        with open("records.json", "r") as f:
-            return json.load(f)
-    return {}
-
-def save_records(records):
-    with open("records.json", "w") as f:
-        json.dump(records, f, indent=4)
 
 # --- SEZIONE PER MANTENERE IL BOT ATTIVO SU RENDER ---
 from flask import Flask
@@ -42,7 +30,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="§", intents=intents)
 
 # --- ID REALI ---
 REVIEW_CHANNEL_ID = 1535055543033532467    
@@ -50,6 +38,65 @@ UPDATES_CHANNEL_ID = 1092204135505461349
 ADMIN_ID = 715247279141027890              
 MIO_ID = 715247279141027890                
 SUBMISSION_CHANNEL_ID = 1300032038165938176 # SOSTITUISCI CON L'ID DI #pb-share
+DATABASE_CHANNEL_ID = 1252593722286276680  # Il canale dove tieni la classifica aggiornata a mano
+
+# --- FUNZIONE PER LEGGERE LA CHAT DI DISCORD COME DATABASE ---
+async def get_wr_from_database(build_name):
+    channel = bot.get_channel(DATABASE_CHANNEL_ID)
+    
+    if not channel:
+        print("ERRORE: Il bot non riesce a vedere il canale database!")
+        return None, None
+        
+    build_clean = build_name.lower().strip()
+    
+    # Scansiona gli ultimi 500 messaggi nel canale
+    async for message in channel.history(limit=500):
+        if not message.content:
+            continue
+            
+        lines = message.content.split('\n')
+        for i, line in enumerate(lines):
+            
+            # Pulizia base per trovare la riga della build
+            clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").strip()
+            
+            # Cerca "build:" e il nome della build
+            if clean_line.startswith("build:") and build_clean in clean_line:
+                
+                # Guarda le prossime 3 righe, così se c'è uno spazio vuoto non si blocca
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    
+                    # Puliamo COMPLETAMENTE la riga del record dai simboli di formattazione di Discord
+                    top_line = lines[j]
+                    top_line = top_line.replace(">", "").replace("_", "").replace("*", "").replace("~", "").strip()
+                    top_line = top_line.replace("–", "-").replace("—", "-")
+                    
+                    # Cerchiamo il trattino che separa l'emoji dal nome
+                    if "-" in top_line:
+                        # Prende tutto quello che c'è dopo il PRIMO trattino
+                        data_str = top_line.split("-", 1)[1].strip() 
+                        
+                        if data_str != "": 
+                            # Taglia partendo dall'ultimo spazio per separare nome e tempo
+                            parts = data_str.rsplit(' ', 1)
+                            if len(parts) == 2:
+                                player = parts[0].strip()
+                                
+                                # Puliamo il tempo da eventuali lettere "s" rimaste
+                                time_str = parts[1].lower().replace("s", "").replace("sec", "").strip()
+                                
+                                try:
+                                    time_val = float(time_str)
+                                    return player, time_val
+                                except ValueError:
+                                    print(f"ERRORE: Impossibile leggere il tempo {time_str}")
+                                    pass
+                        
+                        # Trovato il primo posto (la prima riga col trattino), fermiamo il mini-ciclo
+                        break
+                        
+    return None, None
 
 # 3. Finestra di compilazione (Modal)
 class WRModal(Modal, title='Aggiornamento World Record'):
@@ -69,8 +116,6 @@ class WRModal(Modal, title='Aggiornamento World Record'):
             
         await interaction.response.edit_message(view=self.original_view)
         
-        # --- CALCOLO DEL RECORD ---
-        records = load_records()
         build_key = self.build_name.value.lower().strip()
         current_player = self.player_name.value.strip()
         
@@ -80,14 +125,11 @@ class WRModal(Modal, title='Aggiornamento World Record'):
             new_time = 0.0
 
         extra_message = ""
-        final_player = current_player 
-        aggiorna_json = True 
         
-        # Se la build esiste già nel file JSON, facciamo il confronto
-        if build_key in records:
-            old_time = float(records[build_key]["time"])
-            old_player = records[build_key]["player"]
-            
+        # --- RICERCA DEL VECCHIO RECORD NELLA CHAT ---
+        old_player, old_time = await get_wr_from_database(build_key)
+        
+        if old_player and old_time:
             if new_time < old_time:
                 diff = round(old_time - new_time, 3) 
                 
@@ -104,25 +146,13 @@ class WRModal(Modal, title='Aggiornamento World Record'):
                 else:
                     extra_message = f"\n{current_player} beat {old_player}'s old wr by {diff}s"
                     
-                final_player = current_player 
-                    
             elif new_time == old_time:
                 nomi_vecchi = [p.strip().lower() for p in old_player.split('/')]
                 
                 if current_player.lower() in nomi_vecchi:
                     extra_message = f"\n{current_player} tied their own wr"
-                    final_player = old_player 
                 else:
                     extra_message = f"\n{current_player} tied {old_player}'s wr"
-                    final_player = f"{old_player}/{current_player}" 
-            
-            else:
-                aggiorna_json = False
-        
-        # Aggiorniamo la lista con il nuovo tempo e salviamo (solo se è un record valido)
-        if aggiorna_json:
-            records[build_key] = {"time": new_time, "player": final_player}
-            save_records(records)
         
         # --- MESSAGGIO FINALE ---
         channel = bot.get_channel(UPDATES_CHANNEL_ID)
