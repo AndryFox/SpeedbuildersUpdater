@@ -97,6 +97,19 @@ class ReviewView(View):
         # Conferma visibile solo a te
         await interaction.followup.send("Wr rifiutato. Lo screen è stato salvato in DM.", ephemeral=True)
 
+    # --- NUOVO TASTO SIM WR ---
+    @discord.ui.button(label="Sim Wr", style=discord.ButtonStyle.secondary)
+    async def sim_wr_btn(self, interaction: discord.Interaction, button: Button):
+        # Spegne tutti i tasti
+        for child in self.children:
+            child.disabled = True
+            
+        # Aggiorna il messaggio mostrando i tasti disabilitati
+        await interaction.response.edit_message(view=self)
+        
+        # Manda una conferma invisibile (ephemeral) solo per chiudere l'interazione senza dare errore su Discord
+        await interaction.followup.send("Archiviato come Sim WR.", ephemeral=True)
+
 # 5. Evento principale di ascolto messaggi
 @bot.event
 async def on_message(message):
