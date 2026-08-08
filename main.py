@@ -40,7 +40,18 @@ SUBMISSION_CHANNEL_ID = 1300032038165938176 # SOSTITUISCI CON L'ID DI #pb-share
 DATABASE_CHANNEL_ID = 1252593722286276680  
 RANKINGS_CHANNEL_ID = 1252708822359871620  # SOSTITUISCI CON L'ID DEL CANALE #rankings 
 ADMIN_ID = 715247279141027890              
-MIO_ID = 715247279141027890                
+MIO_ID = 715247279141027890      
+
+# --- SISTEMA DEGLI ALIAS ---
+ALIASES = {
+    "namsarr1": "namsar",
+    "Samu_Onchill": "Boxato"
+    # Puoi aggiungere altri nomi in futuro qui!
+}
+
+def get_main_name(name):
+    n = name.lower().strip()
+    return ALIASES.get(n, n)
 
 # --- FUNZIONE PER LEGGERE LA CLASSIFICA ---
 async def get_wr_count(player_name):
@@ -141,70 +152,75 @@ class WRModal(Modal, title='Aggiornamento World Record'):
         build_key = self.build_name.value.lower().strip()
         current_player = self.player_name.value.strip()
         
+        # Troviamo il VERO nome del giocatore tramite gli alias
+        current_norm = get_main_name(current_player)
+        
         try:
             new_time = float(self.time_val.value)
         except ValueError:
             new_time = 0.0
 
         extra_message = ""
-        stats_msg = "\n" # Qui salveremo i conteggi
+        stats_msg = "\n" 
         
         # --- RICERCA DEL VECCHIO RECORD E CONTEGGIO WR ---
         old_player, old_time = await get_wr_from_database(build_key)
-        current_c = await get_wr_count(current_player)
+        
+        # Usiamo il nome normalizzato per cercare i record nelle classifiche!
+        current_c = await get_wr_count(current_norm)
         
         if old_player and old_time:
             if new_time < old_time:
                 diff = round(old_time - new_time, 3) 
                 
+                # Prepariamo la lista dei vecchi detentori e la normalizziamo
                 nomi_vecchi = [p.strip() for p in old_player.split('/')]
-                nomi_vecchi_lower = [p.lower() for p in nomi_vecchi]
+                nomi_vecchi_norm = [get_main_name(p) for p in nomi_vecchi]
                 
-                if current_player.lower() in nomi_vecchi_lower:
+                # Se il giocatore (con il suo vero nome) era già tra i detentori
+                if current_norm in nomi_vecchi_norm:
                     if len(nomi_vecchi) > 1:
-                        altri_giocatori = [p for p in nomi_vecchi if p.lower() != current_player.lower()]
+                        # Ha battuto se stesso E gli altri che erano in pareggio
+                        altri_giocatori = [p for p in nomi_vecchi if get_main_name(p) != current_norm]
                         altri_formattati = "/".join(altri_giocatori)
                         extra_message = f"\n{current_player} improved their own wr and beat {altri_formattati} by {diff}s"
                     else:
+                        # Era da solo
                         extra_message = f"\n{current_player} improved their own wr by {diff}s"
                         
-                    # Ha migliorato il suo record, quindi non ne guadagna uno nuovo
                     stats_msg += f"{current_player} kept their wr count ({current_c})\n"
                     
-                    # Se c'erano altri giocatori in pareggio con lui, loro lo perdono
                     if len(nomi_vecchi) > 1:
                         for p in altri_giocatori:
-                            old_c = await get_wr_count(p)
+                            p_norm = get_main_name(p)
+                            old_c = await get_wr_count(p_norm)
                             stats_msg += f"{p} lost 1 wr ({old_c} -> {max(0, old_c - 1)})\n"
                             
                 else:
+                    # Ha battuto il record dall'esterno
                     extra_message = f"\n{current_player} beat {old_player}'s old wr by {diff}s"
-                    
-                    # Batte qualcuno dall'esterno: guadagna 1 wr
                     stats_msg += f"{current_player} gained 1 wr ({current_c} -> {current_c + 1})\n"
                     
-                    # Tutti i vecchi detentori lo perdono
                     for p in nomi_vecchi:
-                        old_c = await get_wr_count(p)
+                        p_norm = get_main_name(p)
+                        old_c = await get_wr_count(p_norm)
                         stats_msg += f"{p} lost 1 wr ({old_c} -> {max(0, old_c - 1)})\n"
                     
             elif new_time == old_time:
-                nomi_vecchi = [p.strip().lower() for p in old_player.split('/')]
+                nomi_vecchi = [p.strip() for p in old_player.split('/')]
+                nomi_vecchi_norm = [get_main_name(p) for p in nomi_vecchi]
                 
-                if current_player.lower() in nomi_vecchi:
+                if current_norm in nomi_vecchi_norm:
                     extra_message = f"\n{current_player} tied their own wr"
                     stats_msg += f"{current_player} kept their wr count ({current_c})\n"
                 else:
                     extra_message = f"\n{current_player} tied {old_player}'s wr"
                     stats_msg += f"{current_player} gained 1 wr ({current_c} -> {current_c + 1})\n"
-                    # In caso di pareggio gli altri non perdono il WR, lo condividono
         else:
-            # Nessun vecchio record trovato, è una build nuova o il DB non ha dati
             stats_msg += f"{current_player} gained 1 wr ({current_c} -> {current_c + 1})\n"
         
         # --- MESSAGGIO FINALE ---
         channel = bot.get_channel(UPDATES_CHANNEL_ID)
-        # Uniamo la frase di base (es. beat by 0.1s) con le statistiche sotto
         testo_record = f'```\n{self.build_name.value} : {self.time_val.value} - {self.player_name.value}{extra_message}\n\n{stats_msg.strip()}\n```'
         
         file_da_inviare = await self.attachment.to_file()
