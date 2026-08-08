@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
 import os
+import re
 from dotenv import load_dotenv
 
 # --- SEZIONE PER MANTENERE IL BOT ATTIVO SU RENDER ---
@@ -30,15 +31,53 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="§", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- ID REALI ---
 REVIEW_CHANNEL_ID = 1535055543033532467    
-UPDATES_CHANNEL_ID = 1092204135505461349   
+UPDATES_CHANNEL_ID = 1535055543033532467  
+SUBMISSION_CHANNEL_ID = 1535055543033532467 # SOSTITUISCI CON L'ID DI #pb-share
+DATABASE_CHANNEL_ID = 1252593722286276680  
+RANKINGS_CHANNEL_ID = 1252708822359871620  # SOSTITUISCI CON L'ID DEL CANALE #rankings 
 ADMIN_ID = 715247279141027890              
 MIO_ID = 715247279141027890                
-SUBMISSION_CHANNEL_ID = 1300032038165938176 # SOSTITUISCI CON L'ID DI #pb-share
-DATABASE_CHANNEL_ID = 1252593722286276680  # Il canale dove tieni la classifica aggiornata a mano
+
+# --- FUNZIONE PER LEGGERE LA CLASSIFICA ---
+async def get_wr_count(player_name):
+    channel = bot.get_channel(RANKINGS_CHANNEL_ID)
+    if not channel:
+        return 0
+        
+    p_lower = player_name.lower().strip()
+    
+    # Scansiona gli ultimi 50 messaggi della classifica
+    async for message in channel.history(limit=50):
+        if not message.content:
+            continue
+            
+        lines = message.content.split('\n')
+        for line in lines:
+            line_lower = line.lower()
+            
+            # Se la riga contiene i ":" e la parola "wr"
+            if ":" in line_lower and "wr" in line_lower:
+                parts = line_lower.split(":", 1)
+                left_part = parts[0]
+                right_part = parts[1]
+                
+                # PULIZIA BRUTALE: rimuoviamo grassetti, corsivi, sottolineati e i cancelletti (#) di Discord
+                left_clean = left_part.replace("*", "").replace("_", "").replace("~", "").replace("#", "")
+                
+                # Sostituiamo gli slash con spazi per separare bene i nomi di chi è a pari merito
+                words = left_clean.replace("/", " ").split()
+                
+                # Se il nome del giocatore "pulito" è in questa riga
+                if p_lower in words:
+                    # Cerchiamo il numero prima della scritta "wr"
+                    match = re.search(r'(\d+)\s*wr', right_part)
+                    if match:
+                        return int(match.group(1))
+    return 0
 
 # --- FUNZIONE PER LEGGERE LA CHAT DI DISCORD COME DATABASE ---
 async def get_wr_from_database(build_name):
@@ -50,52 +89,35 @@ async def get_wr_from_database(build_name):
         
     build_clean = build_name.lower().strip()
     
-    # Scansiona gli ultimi 500 messaggi nel canale
     async for message in channel.history(limit=500):
         if not message.content:
             continue
             
         lines = message.content.split('\n')
         for i, line in enumerate(lines):
-            
-            # Pulizia base per trovare la riga della build
             clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").strip()
             
-            # Cerca "build:" e il nome della build
             if clean_line.startswith("build:") and build_clean in clean_line:
-                
-                # Guarda le prossime 3 righe, così se c'è uno spazio vuoto non si blocca
                 for j in range(i + 1, min(i + 4, len(lines))):
-                    
-                    # Puliamo COMPLETAMENTE la riga del record dai simboli di formattazione di Discord
                     top_line = lines[j]
                     top_line = top_line.replace(">", "").replace("_", "").replace("*", "").replace("~", "").strip()
                     top_line = top_line.replace("–", "-").replace("—", "-")
                     
-                    # Cerchiamo il trattino che separa l'emoji dal nome
                     if "-" in top_line:
-                        # Prende tutto quello che c'è dopo il PRIMO trattino
                         data_str = top_line.split("-", 1)[1].strip() 
                         
                         if data_str != "": 
-                            # Taglia partendo dall'ultimo spazio per separare nome e tempo
                             parts = data_str.rsplit(' ', 1)
                             if len(parts) == 2:
                                 player = parts[0].strip()
-                                
-                                # Puliamo il tempo da eventuali lettere "s" rimaste
                                 time_str = parts[1].lower().replace("s", "").replace("sec", "").strip()
                                 
                                 try:
                                     time_val = float(time_str)
                                     return player, time_val
                                 except ValueError:
-                                    print(f"ERRORE: Impossibile leggere il tempo {time_str}")
                                     pass
-                        
-                        # Trovato il primo posto (la prima riga col trattino), fermiamo il mini-ciclo
                         break
-                        
     return None, None
 
 # 3. Finestra di compilazione (Modal)
@@ -125,9 +147,11 @@ class WRModal(Modal, title='Aggiornamento World Record'):
             new_time = 0.0
 
         extra_message = ""
+        stats_msg = "\n" # Qui salveremo i conteggi
         
-        # --- RICERCA DEL VECCHIO RECORD NELLA CHAT ---
+        # --- RICERCA DEL VECCHIO RECORD E CONTEGGIO WR ---
         old_player, old_time = await get_wr_from_database(build_key)
+        current_c = await get_wr_count(current_player)
         
         if old_player and old_time:
             if new_time < old_time:
@@ -143,20 +167,45 @@ class WRModal(Modal, title='Aggiornamento World Record'):
                         extra_message = f"\n{current_player} improved their own wr and beat {altri_formattati} by {diff}s"
                     else:
                         extra_message = f"\n{current_player} improved their own wr by {diff}s"
+                        
+                    # Ha migliorato il suo record, quindi non ne guadagna uno nuovo
+                    stats_msg += f"{current_player} kept their wr count ({current_c})\n"
+                    
+                    # Se c'erano altri giocatori in pareggio con lui, loro lo perdono
+                    if len(nomi_vecchi) > 1:
+                        for p in altri_giocatori:
+                            old_c = await get_wr_count(p)
+                            stats_msg += f"{p} lost 1 wr ({old_c} -> {max(0, old_c - 1)})\n"
+                            
                 else:
                     extra_message = f"\n{current_player} beat {old_player}'s old wr by {diff}s"
+                    
+                    # Batte qualcuno dall'esterno: guadagna 1 wr
+                    stats_msg += f"{current_player} gained 1 wr ({current_c} -> {current_c + 1})\n"
+                    
+                    # Tutti i vecchi detentori lo perdono
+                    for p in nomi_vecchi:
+                        old_c = await get_wr_count(p)
+                        stats_msg += f"{p} lost 1 wr ({old_c} -> {max(0, old_c - 1)})\n"
                     
             elif new_time == old_time:
                 nomi_vecchi = [p.strip().lower() for p in old_player.split('/')]
                 
                 if current_player.lower() in nomi_vecchi:
                     extra_message = f"\n{current_player} tied their own wr"
+                    stats_msg += f"{current_player} kept their wr count ({current_c})\n"
                 else:
                     extra_message = f"\n{current_player} tied {old_player}'s wr"
+                    stats_msg += f"{current_player} gained 1 wr ({current_c} -> {current_c + 1})\n"
+                    # In caso di pareggio gli altri non perdono il WR, lo condividono
+        else:
+            # Nessun vecchio record trovato, è una build nuova o il DB non ha dati
+            stats_msg += f"{current_player} gained 1 wr ({current_c} -> {current_c + 1})\n"
         
         # --- MESSAGGIO FINALE ---
         channel = bot.get_channel(UPDATES_CHANNEL_ID)
-        testo_record = f'```\n{self.build_name.value} : {self.time_val.value} - {self.player_name.value}{extra_message}\n```'
+        # Uniamo la frase di base (es. beat by 0.1s) con le statistiche sotto
+        testo_record = f'```\n{self.build_name.value} : {self.time_val.value} - {self.player_name.value}{extra_message}\n\n{stats_msg.strip()}\n```'
         
         file_da_inviare = await self.attachment.to_file()
         await channel.send(content=testo_record, file=file_da_inviare)
@@ -199,7 +248,6 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Filtra i messaggi che non sono nel canale corretto
     if message.channel.id != SUBMISSION_CHANNEL_ID:
         await bot.process_commands(message)
         return
