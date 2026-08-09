@@ -6,25 +6,30 @@ import time
 from database_utils import get_main_name
 
 def get_role_tag(wr_count: int) -> str:
-    """Restituisce il ruolo in base al numero di WR posseduti."""
-    if wr_count >= 100: return "@Greatest of All Time"
-    elif wr_count >= 90: return "@Legend"
-    elif wr_count >= 80: return "@Grandmaster"
-    elif wr_count >= 70: return "@Master"
-    elif wr_count >= 60: return "@Expert"
-    elif wr_count >= 50: return "@Imperial"
-    elif wr_count >= 45: return "@Professional"
-    elif wr_count >= 40: return "@Talented"
-    elif wr_count >= 35: return "@Skilled"
-    elif wr_count >= 30: return "@Seasoned"
-    elif wr_count >= 25: return "@Experienced"
-    elif wr_count >= 20: return "@Trained"
-    elif wr_count >= 15: return "@Apprentice"
-    elif wr_count >= 10: return "@Amateur"
-    elif wr_count >= 6: return "@Rookie"
-    elif wr_count >= 3: return "@Novice"
-    elif wr_count >= 1: return "@Prospect"
-    else: return "@Newbie"
+    """Restituisce il ping reale al ruolo in base al numero di WR posseduti."""
+    role_name = ""
+    if wr_count >= 100: role_name = "Greatest of All Time"
+    elif wr_count >= 90: role_name = "Legend"
+    elif wr_count >= 80: role_name = "Grandmaster"
+    elif wr_count >= 70: role_name = "Master"
+    elif wr_count >= 60: role_name = "Expert"
+    elif wr_count >= 50: role_name = "Imperial"
+    elif wr_count >= 45: role_name = "Professional"
+    elif wr_count >= 40: role_name = "Talented"
+    elif wr_count >= 35: role_name = "Skilled"
+    elif wr_count >= 30: role_name = "Seasoned"
+    elif wr_count >= 25: role_name = "Experienced"
+    elif wr_count >= 20: role_name = "Trained"
+    elif wr_count >= 15: role_name = "Apprentice"
+    elif wr_count >= 10: role_name = "Amateur"
+    elif wr_count >= 6: role_name = "Rookie"
+    elif wr_count >= 3: role_name = "Novice"
+    elif wr_count >= 1: role_name = "Prospect"
+    else: role_name = "Newbie"
+
+    # Prende l'ID da config.py e lo formatta come menzione di ruolo <@&ID>
+    role_id = config.ROLE_IDS.get(role_name)
+    return f"<@&{role_id}>" if role_id else f"@{role_name}"
 
 def get_ordinal(n: int) -> str:
     """Aggiunge il suffisso ordinale corretto (1st, 2nd, 3rd, 4th...)."""
@@ -91,7 +96,8 @@ async def generate_wr_ranking_text(bot) -> str:
         testo_classifica += riga + "\n"
         posizione += 1
         
-    testo_classifica += "||@Speedbuilders||"
+    # Al posto di testo_classifica += "||@Speedbuilders||"
+    testo_classifica += f"||{config.ROLE_SPEEDBUILDERS}||"
     return testo_classifica
 
 async def trigger_ranking_update(bot):
