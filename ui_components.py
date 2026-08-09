@@ -270,7 +270,7 @@ class ReviewView(View):
         await interaction.response.defer(ephemeral=True)
         
         # Invece di cercare l'utente nei DM, cerca il canale #rejected-screens
-        rejected_channel = self.bot.get_channel(config.REJECTED_CHANNEL_ID)
+        rejected_channel = self.bot.get_channel(config.REJECTE_CHANNEL_ID)
         
         file_to_send = await self.attachment.to_file()
         if rejected_channel:
