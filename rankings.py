@@ -28,8 +28,9 @@ def get_role_tag(wr_count: int) -> str:
     else: role_name = "Newbie"
 
     # Prende l'ID da config.py e lo formatta come menzione di ruolo <@&ID>
-    role_id = config.ROLE_IDS.get(role_name)
-    return f"<@&{role_id}>" if role_id else f"@{role_name}"
+    if hasattr(config, 'ROLE_IDS') and role_name in config.ROLE_IDS:
+        return f"<@&{config.ROLE_IDS[role_name]}>"
+    return f"@{role_name}"
 
 def get_ordinal(n: int) -> str:
     """Aggiunge il suffisso ordinale corretto (1st, 2nd, 3rd, 4th...)."""
@@ -42,29 +43,38 @@ async def generate_wr_ranking_text(bot) -> str:
     db_channel = bot.get_channel(config.DATABASE_CHANNEL_ID)
     wr_counts = {}
     
-    # 1. Scansione del Database (legge gli ultimi 500 messaggi)
-    async for message in db_channel.history(limit=500):
+    # Legge TUTTI i messaggi del canale (limit=None) per non perdere record storici
+    async for message in db_channel.history(limit=None):
         for line in message.content.split('\n'):
-            if ":first_place:" in line and "**__" in line:
+            # Controllo robusto: cerca l'emoji unicode 🥇 o il tag testuale
+            if ("🥇" in line or ":first_place:" in line) and "**__" in line:
                 try:
-                    # Estrae il testo tra **__ e __**
                     start = line.find("**__") + 4
-                    end = line.find("__**")
-                    content = line[start:end]
+                    # Gestiamo possibili sviste di formattazione manuale
+                    end = line.find("__**", start)
+                    if end == -1: 
+                        end = line.find("**", start)
+                    if end == -1: 
+                        end = len(line)
+                        
+                    content = line[start:end].strip()
                     
-                    # Rimuove il tempo alla fine (es. 3.4)
-                    nomi_str = " ".join(content.split()[:-1])
-                    
-                    # Usa get_main_name per unire gli alias come namsarr1 -> namsar
-                    nomi = [get_main_name(n.strip()) for n in nomi_str.split('/')]
+                    # Separa il tempo (l'ultima parola) dai nomi
+                    parts = content.split()
+                    if len(parts) > 1:
+                        nomi_str = " ".join(parts[:-1])
+                    else:
+                        nomi_str = parts[0]
+                        
+                    # Estrae i nomi, divide per / e usa gli alias
+                    nomi = [get_main_name(n.strip()) for n in nomi_str.split('/') if n.strip()]
                     
                     for nome in nomi:
-                        if nome:
-                            wr_counts[nome] = wr_counts.get(nome, 0) + 1
-                except:
-                    pass
+                        wr_counts[nome] = wr_counts.get(nome, 0) + 1
+                except Exception as e:
+                    print(f"Skipped malformed line: {line} -> {e}")
 
-    # 2. Ordinamento e Pareggi
+    # Ordinamento e Pareggi
     sorted_wrs = sorted(wr_counts.items(), key=lambda x: x[1], reverse=True)
     score_groups = {}
     for player, count in sorted_wrs:
@@ -72,7 +82,7 @@ async def generate_wr_ranking_text(bot) -> str:
             score_groups[count] = []
         score_groups[count].append(player)
         
-    # 3. Formattazione Stile
+    # Formattazione Stile
     testo_classifica = f"## Ranking Fear Games WRs (Updated <t:{int(time.time())}:d>)\n"
     
     posizione = 1
@@ -80,7 +90,7 @@ async def generate_wr_ranking_text(bot) -> str:
         players_str = " / ".join(players)
         role = get_role_tag(count)
         
-        # Gestisce i > per le righe 1, 2, 3 e per le posizioni dispari successive
+        # Righe 1, 2, 3 e dispari successive
         has_quote = "> " if (posizione <= 3) or (posizione % 2 != 0) else ""
         ordinale = get_ordinal(posizione)
         
@@ -96,8 +106,9 @@ async def generate_wr_ranking_text(bot) -> str:
         testo_classifica += riga + "\n"
         posizione += 1
         
-    # Al posto di testo_classifica += "||@Speedbuilders||"
-    testo_classifica += f"||{config.ROLE_SPEEDBUILDERS}||"
+    # Usa il ruolo dinamico di Speedbuilders
+    tag_speedbuilders = getattr(config, 'ROLE_SPEEDBUILDERS', '||@Speedbuilders||')
+    testo_classifica += tag_speedbuilders
     return testo_classifica
 
 async def trigger_ranking_update(bot):
