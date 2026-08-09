@@ -10,14 +10,12 @@ def setup_tourney_commands(bot):
     async def setup_tourney(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         
-        # Abbiamo rimosso 'title' e 'url' e usato il Markdown '# ' per farlo grande
+        # Testo pulito, senza commenti invisibili
         embed = discord.Embed(
             color=discord.Color.yellow(),
             description="# Hall of Fame\n\n"
                         "**SBIT** (Summer tourney)\n"
                         "**SBIL** (Winter tourney)\n\n"
-                        "<!-- START LIST -->\n" 
-                        "<!-- END LIST -->\n"
         )
         
         async with aiohttp.ClientSession() as session:
@@ -46,11 +44,9 @@ def setup_tourney_commands(bot):
             old_embed = msg.embeds[0]
             description = old_embed.description
             
+            # Aggiungiamo semplicemente la nuova riga in fondo al testo esistente!
             new_row = f"{tourney} — {player}\n"
-            
-            # Sostituiamo usando i nuovi tag in inglese
-            new_description = description.replace("<!-- END LIST -->\n", f"{new_row}<!-- END LIST -->\n")
-            old_embed.description = new_description
+            old_embed.description = description + new_row
             
             await webhook.edit_message(config.TOURNEY_MESSAGE_ID, embed=old_embed)
             
@@ -75,8 +71,8 @@ def setup_tourney_commands(bot):
             row_to_remove = f"{tourney} — {player}\n"
             
             if row_to_remove in description:
-                new_description = description.replace(row_to_remove, "")
-                old_embed.description = new_description
+                # Sostituisce la riga con il vuoto (""), eliminandola
+                old_embed.description = description.replace(row_to_remove, "")
                 await webhook.edit_message(config.TOURNEY_MESSAGE_ID, embed=old_embed)
                 await interaction.followup.send(f"✅ Removed: {tourney} — {player}")
             else:
