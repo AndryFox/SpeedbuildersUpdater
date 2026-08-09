@@ -32,7 +32,7 @@ RANKINGS_WEBHOOK_URL = "https://discord.com/api/webhooks/1536147190274068641/a5S
 RANKING_WR_MSG_ID = 1536152607930720319
 
 # --- ID RUOLI (Per i tag colorati nelle classifiche) ---
-ROLE_SPEEDBUILDERS = "<@1252708950105657355>" # Se è un ruolo, assicurati che abbia la & così: <@&1252708950105657355>
+ROLE_SPEEDBUILDERS = "<@&1252708950105657355>" # Se è un ruolo, assicurati che abbia la & così: <@&1252708950105657355>
 
 ROLE_IDS = {
     "Greatest of All Time": 1105622890747011182,
