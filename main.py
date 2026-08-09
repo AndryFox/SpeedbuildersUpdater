@@ -39,9 +39,9 @@ async def on_ready():
 
     # --- AGGIUNGI QUESTE DUE RIGHE ---
     setup_tourney_commands(bot)
-    await bot.tree.sync()
-
     setup_rankings_commands(bot)
+
+    await bot.tree.sync()
 
 @bot.event
 async def on_message(message):
