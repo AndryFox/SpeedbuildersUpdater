@@ -37,11 +37,17 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 async def on_ready():
     print(f"✅ Bot {bot.user} avviato con successo e file modulari collegati!")
 
-    # --- AGGIUNGI QUESTE DUE RIGHE ---
     setup_tourney_commands(bot)
     setup_rankings_commands(bot)
 
-    await bot.tree.sync()
+    # Inserisci qui l'ID del tuo server
+    IL_MIO_SERVER = discord.Object(id=935816490039533621)
+    
+    # Forza la sincronizzazione immediata e mirata
+    bot.tree.copy_global_to(guild=IL_MIO_SERVER)
+    await bot.tree.sync(guild=IL_MIO_SERVER)
+    
+    print("✅ Comandi Slash sincronizzati all'istante!")
 
 @bot.event
 async def on_message(message):
