@@ -8,6 +8,7 @@ from threading import Thread
 import config
 from ui_components import ReviewView
 from tourneys import setup_tourney_commands
+from rankings import setup_rankings_commands
 
 # --- SEZIONE PER MANTENERE IL BOT ATTIVO SU RENDER ---
 app = Flask('')
@@ -39,6 +40,8 @@ async def on_ready():
     # --- AGGIUNGI QUESTE DUE RIGHE ---
     setup_tourney_commands(bot)
     await bot.tree.sync()
+
+    setup_rankings_commands(bot)
 
 @bot.event
 async def on_message(message):

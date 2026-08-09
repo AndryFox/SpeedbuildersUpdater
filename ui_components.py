@@ -1,6 +1,7 @@
 import discord
 from discord.ui import Button, View, Modal, TextInput
 import config
+import rankings
 from database_utils import get_main_name, get_wr_count, get_wr_rounds_info, get_wr_from_database, get_sim_wr_link
 
 # --- VIEW PER IL TASTO EDIT (WR NORMALI) ---
@@ -251,7 +252,8 @@ class WRModal(Modal):
                 await interaction.followup.send(f"✅ Record aggiornato con successo!\n🔗 **Clicca qui per aggiornare la lista dei wr:** {jump_url}", ephemeral=True)
             else:
                 await interaction.followup.send("✅ Record aggiornato con successo!\n⚠️ *(Questa sembra una build nuova, non ho link da darti)*", ephemeral=True)
-            
+# --- AGGIORNAMENTO AUTOMATICO RANKING ---
+        await rankings.trigger_ranking_update(self.bot)
 
 # --- BOTTONI SOTTO LO SCREEN ---
 class ReviewView(View):
