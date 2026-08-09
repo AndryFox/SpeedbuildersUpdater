@@ -268,17 +268,20 @@ class ReviewView(View):
     @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger)
     async def reject_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
-        admin_user = await self.bot.fetch_user(config.ADMIN_ID)
+        
+        # Invece di cercare l'utente nei DM, cerca il canale #rejected-screens
+        rejected_channel = self.bot.get_channel(config.REJECTED_CHANNEL_ID)
         
         file_to_send = await self.attachment.to_file()
-        await admin_user.send(content=f"Hai rifiutato questo screen inviato da {self.original_author.mention}:", file=file_to_send)
+        if rejected_channel:
+            await rejected_channel.send(content=f"Screen rifiutato da {self.original_author.mention}:", file=file_to_send)
         
         for child in self.children:
             child.disabled = True
         new_content = f"{interaction.message.content} - **Rejected ❌**"
         await interaction.message.edit(content=new_content, view=self)
         
-        await interaction.followup.send("Wr rifiutato. Lo screen è stato inviato nei tuoi DM.", ephemeral=True)
+        await interaction.followup.send("Screen rifiutato. E' stato spostato in #rejected-screens.", ephemeral=True)
 
     @discord.ui.button(label="Wr Round", style=discord.ButtonStyle.primary)
     async def round_btn(self, interaction: discord.Interaction, button: Button):
