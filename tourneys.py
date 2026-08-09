@@ -10,12 +10,11 @@ def setup_tourney_commands(bot):
     async def setup_tourney(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         
-        # Testo pulito, senza commenti invisibili
         embed = discord.Embed(
             color=discord.Color.yellow(),
             description="# Hall of Fame\n\n"
                         "**SBIT** (Summer tourney)\n"
-                        "**SBIL** (Winter tourney)\n\n"
+                        "**SBIL** (Winter tourney)"
         )
         
         async with aiohttp.ClientSession() as session:
@@ -42,10 +41,16 @@ def setup_tourney_commands(bot):
             msg = await webhook.fetch_message(config.TOURNEY_MESSAGE_ID)
             
             old_embed = msg.embeds[0]
-            description = old_embed.description
+            # Ripuliamo eventuali spazi invisibili a fine testo
+            description = old_embed.description.strip()
             
-            # Aggiungiamo semplicemente la nuova riga in fondo al testo esistente!
-            new_row = f"{tourney} — {player}\n"
+            # Se è il primissimo vincitore (non trova il "—" nella lista), mettiamo il doppio a capo
+            if "—" not in description:
+                new_row = f"\n\n{tourney} — {player}"
+            else:
+                # Altrimenti, andiamo a capo normalmente
+                new_row = f"\n{tourney} — {player}"
+                
             old_embed.description = description + new_row
             
             await webhook.edit_message(config.TOURNEY_MESSAGE_ID, embed=old_embed)
@@ -68,11 +73,21 @@ def setup_tourney_commands(bot):
             old_embed = msg.embeds[0]
             description = old_embed.description
             
-            row_to_remove = f"{tourney} — {player}\n"
+            # Dividiamo tutto il testo in singole righe
+            lines = description.split('\n')
+            new_lines = []
+            removed = False
             
-            if row_to_remove in description:
-                # Sostituisce la riga con il vuoto (""), eliminandola
-                old_embed.description = description.replace(row_to_remove, "")
+            # Teniamo tutte le righe tranne quella che vogliamo eliminare
+            for line in lines:
+                if tourney in line and player in line:
+                    removed = True
+                else:
+                    new_lines.append(line)
+            
+            if removed:
+                # Rimettiamo insieme le righe rimaste
+                old_embed.description = '\n'.join(new_lines).strip()
                 await webhook.edit_message(config.TOURNEY_MESSAGE_ID, embed=old_embed)
                 await interaction.followup.send(f"✅ Removed: {tourney} — {player}")
             else:
