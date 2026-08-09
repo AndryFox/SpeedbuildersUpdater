@@ -282,9 +282,10 @@ class ReviewView(View):
         await interaction.message.edit(content=new_content, view=self)
         
         # --- ELIMINAZIONE AUTOMATICA DOPO 30 SECONDI ---
-        await interaction.message.delete(delay=30)
+        await interaction.message.delete(delay=20)
         
-        await interaction.followup.send("Screen rifiutato. E' stato spostato in #rejected-screens.", ephemeral=True)
+        # --- MESSAGGIO CON LINK CLICCABILE AL CANALE ---
+        await interaction.followup.send(f"Screen rifiutato. È stato spostato in <#{config.REJECT_CHANNEL_ID}>.", ephemeral=True)
 
     @discord.ui.button(label="Wr Round", style=discord.ButtonStyle.primary)
     async def round_btn(self, interaction: discord.Interaction, button: Button):
