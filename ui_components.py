@@ -110,7 +110,6 @@ class WrRoundModal(Modal):
             await self.original_message.edit(content=new_content, view=edit_view)
             await interaction.followup.send("✅ WR Rounds inviato! (Ricorda di aggiornare manualmente la classifica)", ephemeral=True)
 
-
 # --- MODAL PER SIM WR ---
 class SimWrModal(Modal, title='Cerca link per Sim WR'):
     build_name = TextInput(label='Nome build', placeholder='Es. Caveau', required=True)
@@ -124,10 +123,14 @@ class SimWrModal(Modal, title='Cerca link per Sim WR'):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         
+        # Disabilita i bottoni e aggiorna il testo
         for child in self.original_view.children:
             child.disabled = True
         new_content = f"{self.original_message.content} - **Sim WR 🔄**"
         await self.original_message.edit(content=new_content, view=self.original_view)
+        
+        # ELIMINA IL MESSAGGIO DOPO 30 SECONDI
+        await self.original_message.delete(delay=30)
         
         build_key = self.build_name.value.lower().strip()
         jump_url = await get_sim_wr_link(self.bot, build_key)
@@ -136,7 +139,6 @@ class SimWrModal(Modal, title='Cerca link per Sim WR'):
             await interaction.followup.send(f"✅ Archiviato come Sim WR.\n🔗 **Vai ad aggiornare il database:** {jump_url}", ephemeral=True)
         else:
             await interaction.followup.send("✅ Archiviato come Sim WR.\n⚠️ *(Nessun link precedente trovato nel database per questa build)*", ephemeral=True)
-
 
 # --- MODAL WR CLASSICI ---
 class WRModal(Modal):
