@@ -269,7 +269,7 @@ class ReviewView(View):
     async def reject_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
         
-        # Invece di cercare l'utente nei DM, cerca il canale #rejected-screens
+        # Cerca il canale #rejected-screens
         rejected_channel = self.bot.get_channel(config.REJECT_CHANNEL_ID)
         
         file_to_send = await self.attachment.to_file()
@@ -280,6 +280,9 @@ class ReviewView(View):
             child.disabled = True
         new_content = f"{interaction.message.content} - **Rejected ❌**"
         await interaction.message.edit(content=new_content, view=self)
+        
+        # --- ELIMINAZIONE AUTOMATICA DOPO 30 SECONDI ---
+        await interaction.message.delete(delay=30)
         
         await interaction.followup.send("Screen rifiutato. E' stato spostato in #rejected-screens.", ephemeral=True)
 
