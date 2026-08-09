@@ -34,13 +34,13 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- ID REALI ---
-REVIEW_CHANNEL_ID = 1535055543033532467    
-UPDATES_CHANNEL_ID = 1092204135505461349  
-SUBMISSION_CHANNEL_ID = 1300032038165938176 # SOSTITUISCI CON L'ID DI #pb-share
-DATABASE_CHANNEL_ID = 1252593722286276680  
-RANKINGS_CHANNEL_ID = 1252708822359871620  # SOSTITUISCI CON L'ID DEL CANALE #rankings 
-ADMIN_ID = 715247279141027890              
-MIO_ID = 715247279141027890      
+REVIEW_CHANNEL_ID = 1535055543033532467  #verification-chat
+UPDATES_CHANNEL_ID = 1092204135505461349  #wrs-updated
+SUBMISSION_CHANNEL_ID = 1300032038165938176  #pb-share
+DATABASE_CHANNEL_ID = 1252593722286276680  #feargames-wrs
+RANKINGS_CHANNEL_ID = 1252708822359871620  #rankings 
+ADMIN_ID = 715247279141027890
+MIO_ID = 715247279141027890
 
 # --- SISTEMA DEGLI ALIAS ---
 ALIASES = {
@@ -61,7 +61,6 @@ async def get_wr_count(player_name):
         
     p_lower = player_name.lower().strip()
     
-    # Scansiona gli ultimi 50 messaggi della classifica
     async for message in channel.history(limit=50):
         if not message.content:
             continue
@@ -70,33 +69,28 @@ async def get_wr_count(player_name):
         for line in lines:
             line_lower = line.lower()
             
-            # Se la riga contiene i ":" e la parola "wr"
             if ":" in line_lower and "wr" in line_lower:
                 parts = line_lower.split(":", 1)
                 left_part = parts[0]
                 right_part = parts[1]
                 
-                # PULIZIA BRUTALE: rimuoviamo grassetti, corsivi, sottolineati e i cancelletti (#) di Discord
                 left_clean = left_part.replace("*", "").replace("_", "").replace("~", "").replace("#", "")
-                
-                # Sostituiamo gli slash con spazi per separare bene i nomi di chi è a pari merito
                 words = left_clean.replace("/", " ").split()
                 
-                # Se il nome del giocatore "pulito" è in questa riga
                 if p_lower in words:
-                    # Cerchiamo il numero prima della scritta "wr"
                     match = re.search(r'(\d+)\s*wr', right_part)
                     if match:
                         return int(match.group(1))
     return 0
 
 # --- FUNZIONE PER LEGGERE LA CHAT DI DISCORD COME DATABASE ---
+# Ora restituisce anche message.jump_url per linkarti il messaggio!
 async def get_wr_from_database(build_name):
     channel = bot.get_channel(DATABASE_CHANNEL_ID)
     
     if not channel:
         print("ERRORE: Il bot non riesce a vedere il canale database!")
-        return None, None
+        return None, None, None
         
     build_clean = build_name.lower().strip()
     
@@ -125,11 +119,12 @@ async def get_wr_from_database(build_name):
                                 
                                 try:
                                     time_val = float(time_str)
-                                    return player, time_val
+                                    # Ritorna anche il link esatto del messaggio Discord
+                                    return player, time_val, message.jump_url
                                 except ValueError:
                                     pass
                         break
-    return None, None
+    return None, None, None
 
 # 3. Finestra di compilazione (Modal)
 class WRModal(Modal, title='Aggiornamento World Record'):
@@ -152,7 +147,6 @@ class WRModal(Modal, title='Aggiornamento World Record'):
         build_key = self.build_name.value.lower().strip()
         current_player = self.player_name.value.strip()
         
-        # Troviamo il VERO nome del giocatore tramite gli alias
         current_norm = get_main_name(current_player)
         
         try:
@@ -164,28 +158,23 @@ class WRModal(Modal, title='Aggiornamento World Record'):
         stats_msg = "\n" 
         
         # --- RICERCA DEL VECCHIO RECORD E CONTEGGIO WR ---
-        old_player, old_time = await get_wr_from_database(build_key)
+        old_player, old_time, jump_url = await get_wr_from_database(build_key)
         
-        # Usiamo il nome normalizzato per cercare i record nelle classifiche!
         current_c = await get_wr_count(current_norm)
         
-        if old_player and old_time:
+        if old_player and old_time is not None:
             if new_time < old_time:
                 diff = round(old_time - new_time, 3) 
                 
-                # Prepariamo la lista dei vecchi detentori e la normalizziamo
                 nomi_vecchi = [p.strip() for p in old_player.split('/')]
                 nomi_vecchi_norm = [get_main_name(p) for p in nomi_vecchi]
                 
-                # Se il giocatore (con il suo vero nome) era già tra i detentori
                 if current_norm in nomi_vecchi_norm:
                     if len(nomi_vecchi) > 1:
-                        # Ha battuto se stesso E gli altri che erano in pareggio
                         altri_giocatori = [p for p in nomi_vecchi if get_main_name(p) != current_norm]
                         altri_formattati = "/".join(altri_giocatori)
                         extra_message = f"\n{current_player} improved their own wr and beat {altri_formattati} by {diff}s"
                     else:
-                        # Era da solo
                         extra_message = f"\n{current_player} improved their own wr by {diff}s"
                         
                     stats_msg += f"{current_player} kept their wr count ({current_c})\n"
@@ -197,7 +186,6 @@ class WRModal(Modal, title='Aggiornamento World Record'):
                             stats_msg += f"{p} lost 1 wr ({old_c} -> {max(0, old_c - 1)})\n"
                             
                 else:
-                    # Ha battuto il record dall'esterno
                     extra_message = f"\n{current_player} beat {old_player}'s old wr by {diff}s"
                     stats_msg += f"{current_player} gained 1 wr ({current_c} -> {current_c + 1})\n"
                     
@@ -219,12 +207,19 @@ class WRModal(Modal, title='Aggiornamento World Record'):
         else:
             stats_msg += f"{current_player} gained 1 wr ({current_c} -> {current_c + 1})\n"
         
-        # --- MESSAGGIO FINALE ---
+        # --- MESSAGGIO FINALE DEGLI UPDATE ---
         channel = bot.get_channel(UPDATES_CHANNEL_ID)
         testo_record = f'```\n{self.build_name.value} : {self.time_val.value} - {self.player_name.value}{extra_message}\n\n{stats_msg.strip()}\n```'
         
         file_da_inviare = await self.attachment.to_file()
         await channel.send(content=testo_record, file=file_da_inviare)
+
+        # --- FEEDBACK PRIVATO ALL'ADMIN CON IL LINK ---
+        if jump_url:
+            await interaction.followup.send(f"✅ Record aggiornato con successo!\n🔗 **Clicca qui per andare a modificare il database a mano:** {jump_url}", ephemeral=True)
+        else:
+            await interaction.followup.send("✅ Record aggiornato con successo!\n⚠️ *(Questa sembra una build nuova, non ho trovato un messaggio precedente da linkarti per il database)*", ephemeral=True)
+
 
 # 4. Tasti sotto lo screen (View)
 class ReviewView(View):
@@ -257,6 +252,7 @@ class ReviewView(View):
     async def remove_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message("Immagine rimossa perché non inerente.", ephemeral=True)
         await interaction.message.delete()
+
 
 # 5. Evento principale di ascolto messaggi
 @bot.event
