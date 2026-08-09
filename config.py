@@ -21,3 +21,7 @@ ALIASES = {
     "namsarr1": "namsar",
     "samu_onchill": "boxato" # Ricorda di mettere sempre la chiave in minuscolo!
 }
+
+# --- IMPOSTAZIONI WEBHOOK TORNEI ---
+WEBHOOK_URL = "https://discord.com/api/webhooks/1536128543736463522/Kg_nR_IqBvpeMxatz7s6qtFLgi6Y6VRKJQj2UOzxUNLn-DT-paIYQdnoAK3FNEqov33z"
+TOURNEY_MESSAGE_ID = None  # Lo riempiremo dopo aver inviato il primo messaggio!

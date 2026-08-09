@@ -7,6 +7,7 @@ from threading import Thread
 # Importiamo i nostri moduli
 import config
 from ui_components import ReviewView
+from tourneys import setup_tourney_commands
 
 # --- SEZIONE PER MANTENERE IL BOT ATTIVO SU RENDER ---
 app = Flask('')
@@ -34,6 +35,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     print(f"✅ Bot {bot.user} avviato con successo e file modulari collegati!")
+
+    # --- AGGIUNGI QUESTE DUE RIGHE ---
+    setup_tourney_commands(bot)
+    await bot.tree.sync()
 
 @bot.event
 async def on_message(message):
