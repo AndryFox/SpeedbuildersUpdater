@@ -7,7 +7,7 @@ from database_utils import get_main_name
 
 # --- CACHE GLOBALE ---
 PLAYERS_CACHE = []
-WR_RECORDS_CACHE = {} # Ora salva TUTTI i record, non solo i numeri!
+WR_RECORDS_CACHE = {}
 
 def get_role_tag(wr_count: int) -> str:
     role_name = ""
@@ -45,13 +45,20 @@ async def generate_wr_ranking_text(bot) -> str:
     db_channel = bot.get_channel(config.DATABASE_CHANNEL_ID)
     wr_counts = {}
     display_names = {} 
-    temp_records_cache = {} # Cache temporanea per questa lettura
+    temp_records_cache = {}
     
-    async for message in db_channel.history(limit=None):
+    # Memoria per il titolo della build corrente
+    current_build_name = "Build Sconosciuta"
+    
+    # oldest_first=True legge i messaggi dall'alto verso il basso
+    async for message in db_channel.history(limit=None, oldest_first=True):
         for line in message.content.split('\n'):
+            line_str = line.strip()
+            if not line_str:
+                continue
+                
             if ("🥇" in line or ":first_place:" in line) and "**__" in line:
                 try:
-                    # 1. Trova i nomi e i tempi
                     start = line.find("**__") + 4
                     end = line.find("__**", start)
                     if end == -1: end = line.find("**", start)
@@ -60,7 +67,6 @@ async def generate_wr_ranking_text(bot) -> str:
                     content = line[start:end].strip()
                     parts = content.split()
                     
-                    # L'ultimo pezzo è il tempo (es. "6.7"), il resto sono i nomi
                     if len(parts) > 1:
                         nomi_str = " ".join(parts[:-1])
                         time_str = parts[-1]
@@ -68,15 +74,19 @@ async def generate_wr_ranking_text(bot) -> str:
                         nomi_str = parts[0]
                         time_str = "?"
                         
-                    # 2. Estrae il NOME DELLA BUILD togliendo medaglie e formattazioni
-                    raw_prefix = line[:line.find("**__")]
-                    build_name = raw_prefix.replace("🥇", "").replace(":first_place:", "").lstrip("> -•").strip()
-                    if not build_name:
-                        build_name = "Build Sconosciuta"
+                    # 1. Cerca il nome della build sulla stessa riga
+                    idx = line.find("🥇") if "🥇" in line else line.find(":first_place:")
+                    raw_prefix = line[:idx]
+                    build_inline = raw_prefix.replace("**", "").replace(">", "").replace("-", "").replace("•", "").strip()
+                    
+                    # 2. Se non c'è, usa quello memorizzato dalla riga precedente
+                    if build_inline:
+                        final_build = build_inline
+                    else:
+                        final_build = current_build_name
                         
-                    record_entry = f"**{build_name}** (⏱️ {time_str})"
+                    record_entry = f"**{final_build}** (⏱️ {time_str})"
                         
-                    # 3. Assegna il record a tutti i giocatori che lo condividono (in caso di pareggio)
                     nomi_grezzi = [n.strip() for n in nomi_str.split('/') if n.strip()]
                     for nome_grezzo in nomi_grezzi:
                         nome_norm = get_main_name(nome_grezzo)
@@ -93,8 +103,13 @@ async def generate_wr_ranking_text(bot) -> str:
                                 display_names[nome_norm] = nome_grezzo
                 except Exception as e:
                     pass
+            elif "🥈" not in line and "🥉" not in line and ":second_place:" not in line and ":third_place:" not in line:
+                # 3. Se è testo normale, salvalo come potenziale nome della build
+                cleaned = line_str.replace("**", "").replace("__", "").replace(">", "").strip()
+                # Un nome di build raramente supera i 40 caratteri
+                if cleaned and len(cleaned) < 40: 
+                    current_build_name = cleaned
 
-    # Aggiorna la cache globale
     PLAYERS_CACHE = sorted(list(display_names.values()))
     WR_RECORDS_CACHE = temp_records_cache.copy()
 
@@ -186,17 +201,14 @@ def setup_rankings_commands(bot):
             ruolo = get_role_tag(count)
             nome_estetico = player if player.lower() != player_norm else player_norm.capitalize()
             
-            # --- CREAZIONE DELL'EMBED VISIVO ---
             embed = discord.Embed(
                 title=f"🏆 WRs di {nome_estetico} ({count})",
                 description=f"**Ruolo Attuale:** {ruolo}\n\n",
                 color=discord.Color.gold()
             )
             
-            # Crea una lista puntata bellissima
             lista_formattata = "\n".join([f"🔹 {r}" for r in records])
             
-            # Limite di sicurezza (gli Embed di Discord reggono massimo 4096 caratteri)
             if len(lista_formattata) > 3900:
                 lista_formattata = lista_formattata[:3900] + "\n... e altri (limite di testo raggiunto)!"
                 
