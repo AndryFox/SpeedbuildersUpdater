@@ -78,7 +78,7 @@ async def generate_wr_ranking_text(bot) -> str:
                     
                     final_build = build_inline if build_inline else current_build_name
                         
-                    record_entry = f"▸ **{final_build}** ⸻ `{time_str}s`"
+                    record_entry = f"▸ Build: **{final_build}** — `{time_str}s`"
                         
                     # Rimuoviamo le backslash (\) per evitare problemi di formattazione nei nomi
                     nomi_grezzi = [n.strip().replace("\\", "") for n in nomi_str.split('/') if n.strip()]
