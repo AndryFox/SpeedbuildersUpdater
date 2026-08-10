@@ -78,7 +78,7 @@ async def generate_wr_ranking_text(bot) -> str:
                     
                     final_build = build_inline if build_inline else current_build_name
                         
-                    record_entry = f"**{final_build}** (⏱️ {time_str})"
+                    record_entry = f"▸ **{final_build}** ⸻ `{time_str}s`"
                         
                     # Rimuoviamo le backslash (\) per evitare problemi di formattazione nei nomi
                     nomi_grezzi = [n.strip().replace("\\", "") for n in nomi_str.split('/') if n.strip()]
@@ -192,21 +192,32 @@ def setup_rankings_commands(bot):
         
         if count > 0:
             ruolo = get_role_tag(count)
-            # Peschiamo l'estetica esatta (con le maiuscole giuste) direttamente dalla nostra memoria
             nome_estetico = next((p for p in PLAYERS_CACHE if p.lower() == player_norm.lower()), player)
             
+            # API per ottenere automaticamente l'avatar di Minecraft del giocatore
+            avatar_url = f"https://minotar.net/helm/{player_norm}/256.png"
+            
+            # Struttura dell'Embed con colore Oro
             embed = discord.Embed(
-                title=f"🏆 {nome_estetico}'s WRs ({count})",
-                description=f"**Current Role:** {ruolo}\n\n",
-                color=discord.Color.gold()
+                description=f"**Current Rank:** {ruolo}\n\n",
+                color=discord.Color.gold() 
             )
             
-            lista_formattata = "\n".join([f"🔹 {r}" for r in records])
+            # Intestazione e miniatura con la faccia del player
+            embed.set_author(name=f"{nome_estetico}'s World Records ({count})", icon_url=avatar_url)
+            embed.set_thumbnail(url=avatar_url)
+            
+            # Uniamo la lista (senza aggiungere ulteriori emoji, usa il design minimale creato prima)
+            lista_formattata = "\n".join(records)
             
             if len(lista_formattata) > 3900:
-                lista_formattata = lista_formattata[:3900] + "\n... and more (text limit reached)!"
+                lista_formattata = lista_formattata[:3900] + "\n\n*... and more (text limit reached)!*"
                 
             embed.description += lista_formattata
+            
+            # Piè di pagina elegante
+            icon_url = bot.user.avatar.url if bot.user.avatar else None
+            embed.set_footer(text="FearGames Speedbuilders", icon_url=icon_url)
             
             await interaction.followup.send(embed=embed)
         else:
