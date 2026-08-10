@@ -42,8 +42,8 @@ async def on_ready():
 
     # 1. Puliamo i comandi doppi specifici del server
     IL_MIO_SERVER = discord.Object(id=935816490039533621) # Sostituisci con il tuo ID!
-    bot.tree.clear_commands(guild=IL_MIO_SERVER)
     bot.tree.copy_global_to(guild=IL_MIO_SERVER)
+    bot.tree.clear_commands(guild=IL_MIO_SERVER)
     await bot.tree.sync(guild=IL_MIO_SERVER)
     
     # 2. Manteniamo solo la sincronizzazione globale pulita
