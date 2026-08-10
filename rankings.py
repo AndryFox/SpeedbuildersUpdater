@@ -3,13 +3,13 @@ from discord import app_commands
 import config
 import aiohttp
 import time
-from database_utils import get_main_name, get_wr_count
+from database_utils import get_main_name
 
-# --- CACHE DEI GIOCATORI PER L'AUTOCOMPLETAMENTO ---
+# --- CACHE GLOBALE ---
 PLAYERS_CACHE = []
+WR_COUNTS_CACHE = {}
 
 def get_role_tag(wr_count: int) -> str:
-    """Restituisce il ping reale al ruolo in base al numero di WR posseduti."""
     role_name = ""
     if wr_count >= 100: role_name = "Greatest of All Time"
     elif wr_count >= 90: role_name = "Legend"
@@ -35,14 +35,12 @@ def get_role_tag(wr_count: int) -> str:
     return f"@{role_name}"
 
 def get_ordinal(n: int) -> str:
-    """Aggiunge il suffisso ordinale corretto (1st, 2nd, 3rd, 4th...)."""
     if 11 <= (n % 100) <= 13:
         return f"{n}th"
     return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 async def generate_wr_ranking_text(bot) -> str:
-    """Scansiona il database e genera il testo formattato della classifica."""
-    global PLAYERS_CACHE
+    global PLAYERS_CACHE, WR_COUNTS_CACHE
     
     db_channel = bot.get_channel(config.DATABASE_CHANNEL_ID)
     wr_counts = {}
@@ -81,8 +79,9 @@ async def generate_wr_ranking_text(bot) -> str:
                 except Exception as e:
                     pass
 
-    # Aggiorna la cache globale per il menu a tendina
+    # Salviamo i dati aggiornati in memoria!
     PLAYERS_CACHE = sorted(list(display_names.values()))
+    WR_COUNTS_CACHE = wr_counts.copy()
 
     sorted_wrs = sorted(wr_counts.items(), key=lambda x: x[1], reverse=True)
     score_groups = {}
@@ -119,7 +118,6 @@ async def generate_wr_ranking_text(bot) -> str:
     return testo_classifica
 
 async def trigger_ranking_update(bot):
-    """Viene chiamata quando accetti/editi un WR per aggiornare il Webhook."""
     if not hasattr(config, 'RANKING_WR_MSG_ID') or not config.RANKING_WR_MSG_ID:
         return
     
@@ -130,8 +128,6 @@ async def trigger_ranking_update(bot):
         await webhook.edit_message(config.RANKING_WR_MSG_ID, content=new_text)
 
 def setup_rankings_commands(bot):
-    
-    # Crea un task in background per popolare la cache appena il bot si accende
     bot.loop.create_task(generate_wr_ranking_text(bot))
 
     @bot.tree.command(name="setup_rankings", description="Invia il messaggio iniziale della Classifica WR")
@@ -150,30 +146,33 @@ def setup_rankings_commands(bot):
             
         await interaction.followup.send(f"✅ Classifica creata! Copia questo ID e mettilo in config.py come RANKING_WR_MSG_ID:\n**{msg.id}**")
 
-    # --- FUNZIONE PER L'AUTOCOMPLETAMENTO ---
     async def player_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         choices = [
             app_commands.Choice(name=player, value=player)
             for player in PLAYERS_CACHE if current.lower() in player.lower()
         ]
-        return choices[:25] # Discord accetta massimo 25 opzioni nel menu a tendina
+        return choices[:25] 
 
-    # --- NUOVO COMANDO /WRS ---
     @bot.tree.command(name="wrs", description="Controlla quanti WR possiede un giocatore (visibile solo a te)")
     @app_commands.describe(player="Il nome del giocatore da cercare")
     @app_commands.autocomplete(player=player_autocomplete)
     async def check_wrs(interaction: discord.Interaction, player: str):
-        # Limita l'uso del comando al canale sottomissioni
         if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
             return await interaction.response.send_message(
                 f"⚠️ Questo comando può essere usato solo in <#{config.SUBMISSION_CHANNEL_ID}>.", 
                 ephemeral=True
             )
             
-        await interaction.response.defer(ephemeral=True) # Ephemeral = Invisibile agli altri!
+        await interaction.response.defer(ephemeral=True)
         
+        # Se la cache è vuota (es. bot appena acceso), forziamo un calcolo rapido
+        if not WR_COUNTS_CACHE:
+            await generate_wr_ranking_text(bot)
+            
         player_norm = get_main_name(player)
-        count = await get_wr_count(bot, player_norm)
+        
+        # Peschiamo il punteggio direttamente dalla nostra cache!
+        count = WR_COUNTS_CACHE.get(player_norm, 0)
         
         if count > 0:
             ruolo = get_role_tag(count)
