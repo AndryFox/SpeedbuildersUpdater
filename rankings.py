@@ -5,7 +5,7 @@ import aiohttp
 import time
 from database_utils import get_main_name
 
-# --- CACHE GLOBALE ---
+# --- GLOBAL CACHE ---
 PLAYERS_CACHE = []
 WR_RECORDS_CACHE = {}
 
@@ -47,10 +47,8 @@ async def generate_wr_ranking_text(bot) -> str:
     display_names = {} 
     temp_records_cache = {}
     
-    # Memoria per il titolo della build corrente
-    current_build_name = "Build Sconosciuta"
+    current_build_name = "Unknown Build"
     
-    # oldest_first=True legge i messaggi dall'alto verso il basso
     async for message in db_channel.history(limit=None, oldest_first=True):
         for line in message.content.split('\n'):
             line_str = line.strip()
@@ -74,20 +72,17 @@ async def generate_wr_ranking_text(bot) -> str:
                         nomi_str = parts[0]
                         time_str = "?"
                         
-                    # 1. Cerca il nome della build sulla stessa riga
                     idx = line.find("🥇") if "🥇" in line else line.find(":first_place:")
                     raw_prefix = line[:idx]
                     build_inline = raw_prefix.replace("**", "").replace(">", "").replace("-", "").replace("•", "").strip()
                     
-                    # 2. Se non c'è, usa quello memorizzato dalla riga precedente
-                    if build_inline:
-                        final_build = build_inline
-                    else:
-                        final_build = current_build_name
+                    final_build = build_inline if build_inline else current_build_name
                         
                     record_entry = f"**{final_build}** (⏱️ {time_str})"
                         
-                    nomi_grezzi = [n.strip() for n in nomi_str.split('/') if n.strip()]
+                    # Rimuoviamo le backslash (\) per evitare problemi di formattazione nei nomi
+                    nomi_grezzi = [n.strip().replace("\\", "") for n in nomi_str.split('/') if n.strip()]
+                    
                     for nome_grezzo in nomi_grezzi:
                         nome_norm = get_main_name(nome_grezzo)
                         wr_counts[nome_norm] = wr_counts.get(nome_norm, 0) + 1
@@ -98,15 +93,13 @@ async def generate_wr_ranking_text(bot) -> str:
                         
                         if nome_norm not in display_names:
                             if nome_grezzo.lower() != nome_norm.lower():
-                                display_names[nome_norm] = nome_norm.capitalize()
+                                display_names[nome_norm] = nome_norm
                             else:
                                 display_names[nome_norm] = nome_grezzo
                 except Exception as e:
                     pass
             elif "🥈" not in line and "🥉" not in line and ":second_place:" not in line and ":third_place:" not in line:
-                # 3. Se è testo normale, salvalo come potenziale nome della build
                 cleaned = line_str.replace("**", "").replace("__", "").replace(">", "").strip()
-                # Un nome di build raramente supera i 40 caratteri
                 if cleaned and len(cleaned) < 40: 
                     current_build_name = cleaned
 
@@ -118,7 +111,7 @@ async def generate_wr_ranking_text(bot) -> str:
     for player_norm, count in sorted_wrs:
         if count not in score_groups:
             score_groups[count] = []
-        nome_estetico = display_names.get(player_norm, player_norm.capitalize())
+        nome_estetico = display_names.get(player_norm, player_norm)
         score_groups[count].append(nome_estetico)
         
     testo_classifica = f"## Ranking Fear Games WRs (Updated <t:{int(time.time())}:d>)\n"
@@ -160,7 +153,7 @@ async def trigger_ranking_update(bot):
 def setup_rankings_commands(bot):
     bot.loop.create_task(generate_wr_ranking_text(bot))
 
-    @bot.tree.command(name="setup_rankings", description="Invia il messaggio iniziale della Classifica WR")
+    @bot.tree.command(name="setup_rankings", description="Send the initial WR Ranking message")
     async def setup_rankings(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         initial_text = await generate_wr_ranking_text(bot)
@@ -169,7 +162,7 @@ def setup_rankings_commands(bot):
             webhook = discord.Webhook.from_url(config.RANKINGS_WEBHOOK_URL, session=session)
             msg = await webhook.send(content=initial_text, username="Rankings Updater", wait=True)
             
-        await interaction.followup.send(f"✅ Classifica creata! Copia questo ID in config.py:\n**{msg.id}**")
+        await interaction.followup.send(f"✅ Ranking created! Copy this ID into config.py:\n**{msg.id}**")
 
     async def player_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         choices = [
@@ -178,13 +171,13 @@ def setup_rankings_commands(bot):
         ]
         return choices[:25] 
 
-    @bot.tree.command(name="wrs", description="Visualizza tutti i WR e i tempi di un giocatore (visibile solo a te)")
-    @app_commands.describe(player="Il nome del giocatore da cercare")
+    @bot.tree.command(name="wrs", description="Check all WRs and times of a player (visible only to you)")
+    @app_commands.describe(player="The name of the player to search")
     @app_commands.autocomplete(player=player_autocomplete)
     async def check_wrs(interaction: discord.Interaction, player: str):
         if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
             return await interaction.response.send_message(
-                f"⚠️ Questo comando può essere usato solo in <#{config.SUBMISSION_CHANNEL_ID}>.", 
+                f"⚠️ This command can only be used in <#{config.SUBMISSION_CHANNEL_ID}>.", 
                 ephemeral=True
             )
             
@@ -199,21 +192,22 @@ def setup_rankings_commands(bot):
         
         if count > 0:
             ruolo = get_role_tag(count)
-            nome_estetico = player if player.lower() != player_norm else player_norm.capitalize()
+            # Peschiamo l'estetica esatta (con le maiuscole giuste) direttamente dalla nostra memoria
+            nome_estetico = next((p for p in PLAYERS_CACHE if p.lower() == player_norm.lower()), player)
             
             embed = discord.Embed(
-                title=f"🏆 WRs di {nome_estetico} ({count})",
-                description=f"**Ruolo Attuale:** {ruolo}\n\n",
+                title=f"🏆 {nome_estetico}'s WRs ({count})",
+                description=f"**Current Role:** {ruolo}\n\n",
                 color=discord.Color.gold()
             )
             
             lista_formattata = "\n".join([f"🔹 {r}" for r in records])
             
             if len(lista_formattata) > 3900:
-                lista_formattata = lista_formattata[:3900] + "\n... e altri (limite di testo raggiunto)!"
+                lista_formattata = lista_formattata[:3900] + "\n... and more (text limit reached)!"
                 
             embed.description += lista_formattata
             
             await interaction.followup.send(embed=embed)
         else:
-            await interaction.followup.send(f"📉 **{player}** non è ancora presente nella classifica o non ha WR al momento.")
+            await interaction.followup.send(f"📉 **{player}** is not in the rankings yet or has no WRs at the moment.")
