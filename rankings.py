@@ -8,6 +8,7 @@ from database_utils import get_main_name
 # --- GLOBAL CACHE ---
 PLAYERS_CACHE = []
 WR_RECORDS_CACHE = {}
+DISPLAY_NAMES_CACHE = {}
 
 def get_role_tag(wr_count: int) -> str:
     role_name = ""
@@ -40,7 +41,7 @@ def get_ordinal(n: int) -> str:
     return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 async def generate_wr_ranking_text(bot) -> str:
-    global PLAYERS_CACHE, WR_RECORDS_CACHE
+    global PLAYERS_CACHE, WR_RECORDS_CACHE, DISPLAY_NAMES_CACHE
     
     db_channel = bot.get_channel(config.DATABASE_CHANNEL_ID)
     wr_counts = {}
@@ -78,13 +79,17 @@ async def generate_wr_ranking_text(bot) -> str:
                     
                     final_build = build_inline if build_inline else current_build_name
                         
-                    record_entry = f"▸ Build: **{final_build}** — `{time_str}s`"
+                    # Stile con il prefisso "Build:" richiesto
+                    record_entry = f"▸ Build: **{final_build}** ⸻ `{time_str}s`"
                         
-                    # Rimuoviamo le backslash (\) per evitare problemi di formattazione nei nomi
-                    nomi_grezzi = [n.strip().replace("\\", "") for n in nomi_str.split('/') if n.strip()]
+                    # 1. Legge il nome grezzo con i \ inclusi
+                    nomi_grezzi = [n.strip() for n in nomi_str.split('/') if n.strip()]
                     
                     for nome_grezzo in nomi_grezzi:
-                        nome_norm = get_main_name(nome_grezzo)
+                        # 2. Rimuove i \ solo per le conversioni interne e i conteggi
+                        nome_pulito = nome_grezzo.replace("\\", "")
+                        nome_norm = get_main_name(nome_pulito)
+                        
                         wr_counts[nome_norm] = wr_counts.get(nome_norm, 0) + 1
                         
                         if nome_norm not in temp_records_cache:
@@ -92,9 +97,11 @@ async def generate_wr_ranking_text(bot) -> str:
                         temp_records_cache[nome_norm].append(record_entry)
                         
                         if nome_norm not in display_names:
-                            if nome_grezzo.lower() != nome_norm.lower():
+                            if nome_pulito.lower() != nome_norm.lower():
+                                # Se è un alias, usa quello di config.py
                                 display_names[nome_norm] = nome_norm
                             else:
+                                # Se non è un alias, SALVA I \ ORIGINALI per prevenire il corsivo
                                 display_names[nome_norm] = nome_grezzo
                 except Exception as e:
                     pass
@@ -103,7 +110,10 @@ async def generate_wr_ranking_text(bot) -> str:
                 if cleaned and len(cleaned) < 40: 
                     current_build_name = cleaned
 
-    PLAYERS_CACHE = sorted(list(display_names.values()))
+    # La lista per l'autocomplete RIMUOVE i \, in modo che il menu a tendina sia pulito
+    PLAYERS_CACHE = sorted(list({v.replace("\\", "") for v in display_names.values()}))
+    # La memoria globale conserva i \ per formattare la classifica correttamente
+    DISPLAY_NAMES_CACHE = display_names.copy()
     WR_RECORDS_CACHE = temp_records_cache.copy()
 
     sorted_wrs = sorted(wr_counts.items(), key=lambda x: x[1], reverse=True)
@@ -186,28 +196,26 @@ def setup_rankings_commands(bot):
         if not WR_RECORDS_CACHE:
             await generate_wr_ranking_text(bot)
             
-        player_norm = get_main_name(player)
+        # Normalizza la ricerca utente
+        player_norm = get_main_name(player.replace("\\", ""))
         records = WR_RECORDS_CACHE.get(player_norm, [])
         count = len(records)
         
         if count > 0:
             ruolo = get_role_tag(count)
-            nome_estetico = next((p for p in PLAYERS_CACHE if p.lower() == player_norm.lower()), player)
+            # Pesca il nome CON i \, in modo che nell'embed non appaia in corsivo
+            nome_estetico = DISPLAY_NAMES_CACHE.get(player_norm, player)
             
-            # API per ottenere automaticamente l'avatar di Minecraft del giocatore
             avatar_url = f"https://minotar.net/helm/{player_norm}/256.png"
             
-            # Struttura dell'Embed con colore Oro
             embed = discord.Embed(
                 description=f"**Current Rank:** {ruolo}\n\n",
-                color=discord.Color.gold() 
+                color=discord.Color.gold()
             )
             
-            # Intestazione e miniatura con la faccia del player
             embed.set_author(name=f"{nome_estetico}'s World Records ({count})", icon_url=avatar_url)
             embed.set_thumbnail(url=avatar_url)
             
-            # Uniamo la lista (senza aggiungere ulteriori emoji, usa il design minimale creato prima)
             lista_formattata = "\n".join(records)
             
             if len(lista_formattata) > 3900:
@@ -215,7 +223,6 @@ def setup_rankings_commands(bot):
                 
             embed.description += lista_formattata
             
-            # Piè di pagina elegante
             icon_url = bot.user.avatar.url if bot.user.avatar else None
             embed.set_footer(text="FearGames Speedbuilders", icon_url=icon_url)
             
