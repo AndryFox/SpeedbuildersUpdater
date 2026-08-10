@@ -3,7 +3,10 @@ from discord import app_commands
 import config
 import aiohttp
 import time
-from database_utils import get_main_name
+from database_utils import get_main_name, get_wr_count
+
+# --- CACHE DEI GIOCATORI PER L'AUTOCOMPLETAMENTO ---
+PLAYERS_CACHE = []
 
 def get_role_tag(wr_count: int) -> str:
     """Restituisce il ping reale al ruolo in base al numero di WR posseduti."""
@@ -27,7 +30,6 @@ def get_role_tag(wr_count: int) -> str:
     elif wr_count >= 1: role_name = "Prospect"
     else: role_name = "Newbie"
 
-    # Prende l'ID da config.py e lo formatta come menzione di ruolo <@&ID>
     if hasattr(config, 'ROLE_IDS') and role_name in config.ROLE_IDS:
         return f"<@&{config.ROLE_IDS[role_name]}>"
     return f"@{role_name}"
@@ -40,17 +42,17 @@ def get_ordinal(n: int) -> str:
 
 async def generate_wr_ranking_text(bot) -> str:
     """Scansiona il database e genera il testo formattato della classifica."""
+    global PLAYERS_CACHE
+    
     db_channel = bot.get_channel(config.DATABASE_CHANNEL_ID)
     wr_counts = {}
+    display_names = {} 
     
-    # Legge TUTTI i messaggi del canale (limit=None) per non perdere record storici
     async for message in db_channel.history(limit=None):
         for line in message.content.split('\n'):
-            # Controllo robusto: cerca l'emoji unicode 🥇 o il tag testuale
             if ("🥇" in line or ":first_place:" in line) and "**__" in line:
                 try:
                     start = line.find("**__") + 4
-                    # Gestiamo possibili sviste di formattazione manuale
                     end = line.find("__**", start)
                     if end == -1: 
                         end = line.find("**", start)
@@ -59,30 +61,37 @@ async def generate_wr_ranking_text(bot) -> str:
                         
                     content = line[start:end].strip()
                     
-                    # Separa il tempo (l'ultima parola) dai nomi
                     parts = content.split()
                     if len(parts) > 1:
                         nomi_str = " ".join(parts[:-1])
                     else:
                         nomi_str = parts[0]
                         
-                    # Estrae i nomi, divide per / e usa gli alias
-                    nomi = [get_main_name(n.strip()) for n in nomi_str.split('/') if n.strip()]
+                    nomi_grezzi = [n.strip() for n in nomi_str.split('/') if n.strip()]
                     
-                    for nome in nomi:
-                        wr_counts[nome] = wr_counts.get(nome, 0) + 1
+                    for nome_grezzo in nomi_grezzi:
+                        nome_norm = get_main_name(nome_grezzo)
+                        wr_counts[nome_norm] = wr_counts.get(nome_norm, 0) + 1
+                        
+                        if nome_norm not in display_names:
+                            if nome_grezzo.lower() != nome_norm.lower():
+                                display_names[nome_norm] = nome_norm.capitalize()
+                            else:
+                                display_names[nome_norm] = nome_grezzo
                 except Exception as e:
-                    print(f"Skipped malformed line: {line} -> {e}")
+                    pass
 
-    # Ordinamento e Pareggi
+    # Aggiorna la cache globale per il menu a tendina
+    PLAYERS_CACHE = sorted(list(display_names.values()))
+
     sorted_wrs = sorted(wr_counts.items(), key=lambda x: x[1], reverse=True)
     score_groups = {}
-    for player, count in sorted_wrs:
+    for player_norm, count in sorted_wrs:
         if count not in score_groups:
             score_groups[count] = []
-        score_groups[count].append(player)
+        nome_estetico = display_names.get(player_norm, player_norm.capitalize())
+        score_groups[count].append(nome_estetico)
         
-    # Formattazione Stile
     testo_classifica = f"## Ranking Fear Games WRs (Updated <t:{int(time.time())}:d>)\n"
     
     posizione = 1
@@ -90,7 +99,6 @@ async def generate_wr_ranking_text(bot) -> str:
         players_str = " / ".join(players)
         role = get_role_tag(count)
         
-        # Righe 1, 2, 3 e dispari successive
         has_quote = "> " if (posizione <= 3) or (posizione % 2 != 0) else ""
         ordinale = get_ordinal(posizione)
         
@@ -106,7 +114,6 @@ async def generate_wr_ranking_text(bot) -> str:
         testo_classifica += riga + "\n"
         posizione += 1
         
-    # Usa il ruolo dinamico di Speedbuilders
     tag_speedbuilders = getattr(config, 'ROLE_SPEEDBUILDERS', '||@Speedbuilders||')
     testo_classifica += tag_speedbuilders
     return testo_classifica
@@ -123,6 +130,10 @@ async def trigger_ranking_update(bot):
         await webhook.edit_message(config.RANKING_WR_MSG_ID, content=new_text)
 
 def setup_rankings_commands(bot):
+    
+    # Crea un task in background per popolare la cache appena il bot si accende
+    bot.loop.create_task(generate_wr_ranking_text(bot))
+
     @bot.tree.command(name="setup_rankings", description="Invia il messaggio iniziale della Classifica WR")
     async def setup_rankings(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -138,3 +149,35 @@ def setup_rankings_commands(bot):
             )
             
         await interaction.followup.send(f"✅ Classifica creata! Copia questo ID e mettilo in config.py come RANKING_WR_MSG_ID:\n**{msg.id}**")
+
+    # --- FUNZIONE PER L'AUTOCOMPLETAMENTO ---
+    async def player_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        choices = [
+            app_commands.Choice(name=player, value=player)
+            for player in PLAYERS_CACHE if current.lower() in player.lower()
+        ]
+        return choices[:25] # Discord accetta massimo 25 opzioni nel menu a tendina
+
+    # --- NUOVO COMANDO /WRS ---
+    @bot.tree.command(name="wrs", description="Controlla quanti WR possiede un giocatore (visibile solo a te)")
+    @app_commands.describe(player="Il nome del giocatore da cercare")
+    @app_commands.autocomplete(player=player_autocomplete)
+    async def check_wrs(interaction: discord.Interaction, player: str):
+        # Limita l'uso del comando al canale sottomissioni
+        if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
+            return await interaction.response.send_message(
+                f"⚠️ Questo comando può essere usato solo in <#{config.SUBMISSION_CHANNEL_ID}>.", 
+                ephemeral=True
+            )
+            
+        await interaction.response.defer(ephemeral=True) # Ephemeral = Invisibile agli altri!
+        
+        player_norm = get_main_name(player)
+        count = await get_wr_count(bot, player_norm)
+        
+        if count > 0:
+            ruolo = get_role_tag(count)
+            nome_estetico = player if player.lower() != player_norm else player_norm.capitalize()
+            await interaction.followup.send(f"🏆 **{nome_estetico}** possiede **{count} Wrs** ({ruolo})")
+        else:
+            await interaction.followup.send(f"📉 **{player}** non è ancora presente nella classifica o non ha WR al momento.")
