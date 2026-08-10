@@ -6,6 +6,7 @@ from threading import Thread
 
 # Importiamo i nostri moduli
 import config
+import rankings
 from ui_components import ReviewView
 from tourneys import setup_tourney_commands
 from rankings import setup_rankings_commands
@@ -54,6 +55,10 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    # --- SENSORE: Se scrivi un NUOVO messaggio a mano nel database ---
+    if message.channel.id == config.DATABASE_CHANNEL_ID:
+        await rankings.trigger_ranking_update(bot)
+
     if message.channel.id != config.SUBMISSION_CHANNEL_ID:
         await bot.process_commands(message)
         return
@@ -78,6 +83,18 @@ async def on_message(message):
         await message.channel.send(f"{message.author.mention}, your world record has been sent for review!", delete_after=5)
 
     await bot.process_commands(message)
+
+@bot.event
+async def on_raw_message_edit(payload):
+    """Sensore: si accorge se modifichi un testo esistente nel database"""
+    if payload.channel_id == config.DATABASE_CHANNEL_ID:
+        await rankings.trigger_ranking_update(bot)
+
+@bot.event
+async def on_raw_message_delete(payload):
+    """Sensore: si accorge se elimini un record dal database"""
+    if payload.channel_id == config.DATABASE_CHANNEL_ID:
+        await rankings.trigger_ranking_update(bot)
 
 # Avvio del bot
 if __name__ == "__main__":
