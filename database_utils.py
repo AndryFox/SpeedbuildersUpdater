@@ -70,7 +70,7 @@ async def get_wr_rounds_info(bot):
 
 async def get_wr_from_database(bot, build_name, channel_id=None):
     if channel_id is None:
-        channel_id = config.DATABASE_CHANNEL_ID
+        channel_id = config.WR_CHANNEL_ID
         
     channel = bot.get_channel(channel_id)
     
