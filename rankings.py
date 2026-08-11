@@ -164,24 +164,50 @@ async def generate_rounds_ranking_text(bot) -> str:
     db_channel = bot.get_channel(config.DATABASE_CHANNEL_ID)
     testo_rounds = f"## ⚔️ Ranking Fear Games WR Rounds (Updated <t:{int(time.time())}:d>)\n\n"
     
-    rounds_trovati = []
+    rounds_lines = []
+    is_parsing_rounds = False
     
-    # Scansioniamo il database cercando specificamente i record dei round
     async for message in db_channel.history(limit=None, oldest_first=True):
         for line in message.content.split('\n'):
             line_str = line.strip()
-            # Intercettiamo le righe che parlano di "Rounds" o contengono i timestamp specifici
-            if "rounds" in line_str.lower():
-                # Rimuoviamo il blocco di codice fix per renderlo pulito nell'embed
-                clean_line = line_str.replace("```fix", "").replace("```", "").strip()
-                if clean_line:
-                    rounds_trovati.append(f"▸ {clean_line}")
+            
+            if not line_str:
+                # Se siamo dentro la zona dei round, manteniamo anche le righe vuote per l'estetica
+                if is_parsing_rounds:
+                    rounds_lines.append("") 
+                continue
                 
-    if rounds_trovati:
-        testo_rounds += "\n\n".join(rounds_trovati)
+            # Interruttore ON: appena il bot legge l'inizio della sezione Round
+            if "wr rounds" in line_str.lower() and "legit" in line_str.lower():
+                is_parsing_rounds = True
+                continue # Saltiamo la vecchia riga "The Wr rounds...", usiamo la nostra in alto
+                
+            # Interruttore OFF: appena il bot vede il tag finale, smette di copiare
+            if "||@Speedbuilders||" in line_str or "In total" in line_str:
+                is_parsing_rounds = False
+                continue
+                
+            # Se lo scanner è acceso, salva ogni singola lettera e formattazione esattamente come l'hai scritta!
+            if is_parsing_rounds:
+                rounds_lines.append(line_str)
+                continue
+                
+            # Backup: cattura righe isolate nel caso dimenticassi l'intestazione
+            if ("<t:" in line_str and "|" in line_str and "&" in line_str) or (":first_place:" in line_str and "Rounds" in line_str):
+                if line_str not in rounds_lines:
+                    rounds_lines.append(line_str)
+
+    if rounds_lines:
+        # Uniamo le righe e rimuoviamo gli spazi vuoti in eccesso
+        testo_pulito = "\n".join(rounds_lines).strip()
+        testo_rounds += testo_pulito
     else:
         testo_rounds += "*Nessun record per i round trovato al momento.*"
         
+    # Aggiungiamo il tag in fondo
+    tag_speedbuilders = getattr(config, 'ROLE_SPEEDBUILDERS', '||@Speedbuilders||')
+    testo_rounds += f"\n\n{tag_speedbuilders}"
+    
     return testo_rounds
 
 async def trigger_rounds_update(bot):
