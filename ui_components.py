@@ -119,7 +119,7 @@ class WrRoundModal(Modal):
         self.add_item(self.winner_name)
         self.add_item(self.opponent_name)
 
-    async def on_submit(self, interaction: discord.Interaction):
+async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         
         try:
@@ -128,6 +128,12 @@ class WrRoundModal(Modal):
             new_rounds = 0
 
         current_team = f"{self.winner_name.value.strip()} & {self.opponent_name.value.strip()}"
+        
+        # Importiamo le funzioni aggiornate
+        from database_utils import get_wr_rounds_info, update_wr_rounds_database
+        import rankings
+        
+        # 1. Recupera quanti round aveva il record precedente
         old_rounds, old_holders = await get_wr_rounds_info(self.bot)
 
         extra_message = ""
@@ -143,25 +149,36 @@ class WrRoundModal(Modal):
 
         if self.is_edit:
             await self.update_message.edit(content=testo_record)
-            
             self.original_view.def_r = self.rounds_val.value
             self.original_view.def_w = self.winner_name.value
             self.original_view.def_o = self.opponent_name.value
-            
             await self.original_message.edit(view=self.original_view)
-            await interaction.followup.send("✅ Modifica salvata con successo!", ephemeral=True)
+            await interaction.followup.send("✅ Modifica testuale salvata! (L'ordine nella top 5 richiede una correzione manuale in edit)", ephemeral=True)
             
         else:
             channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
             file_da_inviare = await self.attachment.to_file()
+            
+            # Invia l'aggiornamento e ospita l'immagine nativamente su Discord
             update_msg = await channel.send(content=testo_record, file=file_da_inviare)
+
+            # Estrapoliamo il link finale dell'immagine 
+            image_url = update_msg.attachments[0].url if update_msg.attachments else update_msg.jump_url
+            
+            # --- FASE DI AUTOMAZIONE ---
+            # Il bot legge i round, scalza il 6° posto e riscrive la classifica nel database
+            await update_wr_rounds_database(self.bot, new_rounds, current_team, image_url)
+            
+            # Fa scattare il webhook per mostrare al server pubblico la classifica aggiornata
+            await rankings.trigger_rounds_update(self.bot)
 
             edit_view = EditRoundView(self.bot, self.attachment, update_msg, self.rounds_val.value, self.winner_name.value, self.opponent_name.value, self.original_message)
             
             new_content = f"{self.original_message.content} - **Accepted ✅**"
             await self.original_message.edit(content=new_content, view=edit_view)
-            await interaction.followup.send("✅ WR Rounds inviato! (Ricorda di aggiornare manualmente la classifica)", ephemeral=True)
-
+            
+            await interaction.followup.send("✅ WR Rounds elaborato: link immagine acquisito, database aggiornato e classifica ricalcolata in totale autonomia!", ephemeral=True)
+    
 # --- MODAL PER SIM WR ---
 class SimWrModal(Modal, title='Cerca link per Sim WR'):
     build_name = TextInput(label='Nome build', placeholder='Es. Caveau', required=True)

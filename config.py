@@ -32,6 +32,11 @@ RANKINGS_WEBHOOK_URL = "https://discord.com/api/webhooks/1536147190274068641/a5S
 RANKING_WR_MSG_ID = 1536167006985003108
 RANKING_ROUNDS_MSG_ID = 1536732528776585317
 
+# --- DATABASE ROUNDS ---
+ROUNDS_DB_CHANNEL_ID = 935822009097670676
+# ID del singolo messaggio in quel canale in cui scriverai i primi 5 record iniziali
+ROUNDS_DB_MSG_ID = 1234567890123456789 # Sostituisci con l'ID reale del messaggio
+
 # --- ID RUOLI (Per i tag colorati nelle classifiche) ---
 ROLE_SPEEDBUILDERS = "<@&1052359365803393124>" # Se è un ruolo, assicurati che abbia la & così: <@&1252708950105657355>
 

@@ -90,16 +90,20 @@ async def on_message(message):
 
 @bot.event
 async def on_raw_message_edit(payload):
-    """Sensore: si accorge se modifichi un testo esistente nel database"""
     if payload.channel_id == config.DATABASE_CHANNEL_ID:
         await rankings.trigger_ranking_update(bot)
+        await rankings.trigger_rounds_update(bot)
+    # NUOVO SENSORE
+    elif hasattr(config, 'ROUNDS_DB_CHANNEL_ID') and payload.channel_id == config.ROUNDS_DB_CHANNEL_ID:
         await rankings.trigger_rounds_update(bot)
 
 @bot.event
 async def on_raw_message_delete(payload):
-    """Sensore: si accorge se elimini un record dal database"""
     if payload.channel_id == config.DATABASE_CHANNEL_ID:
         await rankings.trigger_ranking_update(bot)
+        await rankings.trigger_rounds_update(bot)
+    # NUOVO SENSORE
+    elif hasattr(config, 'ROUNDS_DB_CHANNEL_ID') and payload.channel_id == config.ROUNDS_DB_CHANNEL_ID:
         await rankings.trigger_rounds_update(bot)
 
 # Avvio del bot
