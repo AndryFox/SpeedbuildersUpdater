@@ -79,14 +79,11 @@ async def generate_wr_ranking_text(bot) -> str:
                     
                     final_build = build_inline if build_inline else current_build_name
                         
-                    # Stile con il prefisso "Build:" richiesto
                     record_entry = f"▸ Build: **{final_build}** ⸻ `{time_str}s`"
                         
-                    # 1. Legge il nome grezzo con i \ inclusi
                     nomi_grezzi = [n.strip() for n in nomi_str.split('/') if n.strip()]
                     
                     for nome_grezzo in nomi_grezzi:
-                        # 2. Rimuove i \ solo per le conversioni interne e i conteggi
                         nome_pulito = nome_grezzo.replace("\\", "")
                         nome_norm = get_main_name(nome_pulito)
                         
@@ -98,10 +95,8 @@ async def generate_wr_ranking_text(bot) -> str:
                         
                         if nome_norm not in display_names:
                             if nome_pulito.lower() != nome_norm.lower():
-                                # Se è un alias, usa quello di config.py
                                 display_names[nome_norm] = nome_norm
                             else:
-                                # Se non è un alias, SALVA I \ ORIGINALI per prevenire il corsivo
                                 display_names[nome_norm] = nome_grezzo
                 except Exception as e:
                     pass
@@ -110,9 +105,7 @@ async def generate_wr_ranking_text(bot) -> str:
                 if cleaned and len(cleaned) < 40: 
                     current_build_name = cleaned
 
-    # La lista per l'autocomplete RIMUOVE i \, in modo che il menu a tendina sia pulito
     PLAYERS_CACHE = sorted(list({v.replace("\\", "") for v in display_names.values()}))
-    # La memoria globale conserva i \ per formattare la classifica correttamente
     DISPLAY_NAMES_CACHE = display_names.copy()
     WR_RECORDS_CACHE = temp_records_cache.copy()
 
@@ -161,59 +154,14 @@ async def trigger_ranking_update(bot):
         await webhook.edit_message(config.RANKING_WR_MSG_ID, content=new_text)
 
 async def generate_rounds_ranking_text(bot) -> str:
-    # Puntiamo al canale privato usando l'ID che mi hai fornito
-    rounds_channel = bot.get_channel(935822009097670676)
+    # TAGLIATO FUORI IL CANALE PRIVATO - NESSUNA LETTURA ESTERNA
     testo_rounds = f"## ⚔️ Ranking Fear Games WR Rounds (Updated <t:{int(time.time())}:d>)\n\n"
     
-    if not rounds_channel:
-        return testo_rounds + "*⚠️ Errore: Il bot non ha accesso al canale dei round.*"
-        
-    rounds_lines = []
-    is_parsing_rounds = False
-    
-    # history(limit=1) prende ESATTAMENTE l'ultimo messaggio del canale
-    async for message in rounds_channel.history(limit=1):
-        for line in message.content.split('\n'):
-            line_str = line.strip()
-            
-            if not line_str:
-                if is_parsing_rounds:
-                    rounds_lines.append("") 
-                continue
-                
-            # Interruttore OFF preventivo per ignorare le statistiche sulle build
-            if "in total fear games have" in line_str.lower():
-                is_parsing_rounds = False
-                continue
-                
-            # Interruttore ON: inizia la classifica dei round
-            if "wr rounds" in line_str.lower() and "legit" in line_str.lower():
-                is_parsing_rounds = True
-                continue 
-                
-            # Interruttore OFF: intercetta qualsiasi variante del tag o ID numerico
-            if "speedbuilders" in line_str.lower() or "<@&" in line_str:
-                is_parsing_rounds = False
-                continue
-                
-            if is_parsing_rounds:
-                rounds_lines.append(line_str)
-                continue
-                
-            # Backup di sicurezza se l'intestazione dovesse mancare
-            if ("<t:" in line_str and "|" in line_str and "&" in line_str) or (":first_place:" in line_str and "Rounds" in line_str):
-                is_parsing_rounds = True
-                if line_str not in rounds_lines:
-                    rounds_lines.append(line_str)
-
-    if rounds_lines:
-        testo_pulito = "\n".join(rounds_lines).strip()
-        testo_rounds += testo_pulito
-    else:
-        testo_rounds += "*Nessun record per i round trovato al momento nell'ultimo messaggio.*"
+    # Classifica letteralmente vuota per fare tabula rasa pulita
+    testo_rounds += "*Classifica attualmente vuota.*\n\n"
         
     tag_speedbuilders = getattr(config, 'ROLE_SPEEDBUILDERS', '||@Speedbuilders||')
-    testo_rounds += f"\n\n{tag_speedbuilders}"
+    testo_rounds += f"{tag_speedbuilders}"
     
     return testo_rounds
 
@@ -274,14 +222,12 @@ def setup_rankings_commands(bot):
         if not WR_RECORDS_CACHE:
             await generate_wr_ranking_text(bot)
             
-        # Normalizza la ricerca utente
         player_norm = get_main_name(player.replace("\\", ""))
         records = WR_RECORDS_CACHE.get(player_norm, [])
         count = len(records)
         
         if count > 0:
             ruolo = get_role_tag(count)
-            # Pesca il nome CON i \, in modo che nell'embed non appaia in corsivo
             nome_estetico = DISPLAY_NAMES_CACHE.get(player_norm, player)
             
             avatar_url = f"https://minotar.net/helm/{player_norm}/256.png"
