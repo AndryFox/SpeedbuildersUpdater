@@ -21,7 +21,12 @@ async def get_wr_count(bot, player_name):
             line_lower = line.lower()
             
             if ":" in line_lower and "wr" in line_lower:
-                parts = line_lower.split(":", 1)
+                # Usa rsplit per dividere la frase all'ULTIMO due punti (ignora le emoji :first_place:)
+                parts = line_lower.rsplit(":", 1)
+                
+                if len(parts) < 2:
+                    continue
+                    
                 left_part = parts[0]
                 right_part = parts[1]
                 
@@ -29,6 +34,7 @@ async def get_wr_count(bot, player_name):
                 words = left_clean.replace("/", " ").split()
                 
                 if p_lower in words:
+                    import re
                     match = re.search(r'(\d+)\s*wr', right_part)
                     if match:
                         return int(match.group(1))
