@@ -42,7 +42,7 @@ def get_ordinal(n: int) -> str:
 
 async def generate_wr_ranking_text(bot) -> str:
     global PLAYERS_CACHE, WR_RECORDS_CACHE, DISPLAY_NAMES_CACHE
-    db_channel = bot.get_channel(config.DATABASE_CHANNEL_ID)
+    db_channel = bot.get_channel(config.WR_CHANNEL_ID)
     wr_counts = {}
     display_names = {} 
     temp_records_cache = {}
