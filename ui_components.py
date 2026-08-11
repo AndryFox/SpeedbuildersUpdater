@@ -119,7 +119,7 @@ class WrRoundModal(Modal):
         self.add_item(self.winner_name)
         self.add_item(self.opponent_name)
 
-async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         
         try:
