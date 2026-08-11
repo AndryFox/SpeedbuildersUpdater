@@ -60,7 +60,7 @@ async def on_message(message):
         return
 
     # --- SENSORE: Se scrivi un NUOVO messaggio a mano nel database ---
-    if message.channel.id == config.DATABASE_CHANNEL_ID:
+    if message.channel.id == config.WR_CHANNEL_ID:
         await rankings.trigger_ranking_update(bot)
 
     if message.channel.id != config.SUBMISSION_CHANNEL_ID:
