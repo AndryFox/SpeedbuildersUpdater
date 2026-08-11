@@ -38,14 +38,18 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 async def on_ready():
     print(f"✅ Bot {bot.user} avviato con successo e file modulari collegati!")
 
+    # --- REGISTRA I BOTTONI IMMORTALI QUI ---
+    bot.add_view(ReviewView())
+
     setup_tourney_commands(bot)
     setup_rankings_commands(bot)
 
     # 1. Puliamo i comandi doppi specifici del server
-    IL_MIO_SERVER = discord.Object(id=935816490039533621) # Sostituisci con il tuo ID!
-    bot.tree.copy_global_to(guild=IL_MIO_SERVER)
-    bot.tree.clear_commands(guild=IL_MIO_SERVER)
-    await bot.tree.sync(guild=IL_MIO_SERVER)
+    IL_MIO_SERVER = discord.Object(id=935816490039533621) 
+    
+    bot.tree.clear_commands(guild=IL_MIO_SERVER) # PRIMA fai tabula rasa
+    bot.tree.copy_global_to(guild=IL_MIO_SERVER) # POI copi i comandi aggiornati
+    await bot.tree.sync(guild=IL_MIO_SERVER)     # INFINE applichi le modifiche al server
     
     # 2. Manteniamo solo la sincronizzazione globale pulita
     await bot.tree.sync()
@@ -71,7 +75,7 @@ async def on_message(message):
         
         for attachment in message.attachments:
             # Passiamo il bot, la foto e l'autore alla vista
-            view = ReviewView(bot, attachment, message.author)
+            view = ReviewView()
             file_review = await attachment.to_file()
             
             await review_channel.send(
@@ -89,12 +93,14 @@ async def on_raw_message_edit(payload):
     """Sensore: si accorge se modifichi un testo esistente nel database"""
     if payload.channel_id == config.DATABASE_CHANNEL_ID:
         await rankings.trigger_ranking_update(bot)
+        await rankings.trigger_rounds_update(bot)
 
 @bot.event
 async def on_raw_message_delete(payload):
     """Sensore: si accorge se elimini un record dal database"""
     if payload.channel_id == config.DATABASE_CHANNEL_ID:
         await rankings.trigger_ranking_update(bot)
+        await rankings.trigger_rounds_update(bot)
 
 # Avvio del bot
 if __name__ == "__main__":

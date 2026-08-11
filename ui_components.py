@@ -6,7 +6,7 @@ from database_utils import get_main_name, get_wr_count, get_wr_rounds_info, get_
 
 # --- VIEW PER IL TASTO EDIT (WR NORMALI) ---
 class EditWRView(View):
-    def __init__(self, bot, attachment, update_message, def_b, def_t, def_p, jump_url):
+    def __init__(self, bot, attachment, update_message, def_b, def_t, def_p, jump_url, original_message):
         super().__init__(timeout=None)
         self.bot = bot
         self.attachment = attachment
@@ -14,23 +14,52 @@ class EditWRView(View):
         self.def_b = def_b
         self.def_t = def_t
         self.def_p = def_p
+        self.original_message = original_message # Salviamo il messaggio originale per poterlo annullare
         
-        # Aggiungiamo il tasto Link al database con il nuovo nome in inglese
         if jump_url: 
             self.add_item(discord.ui.Button(label="Go to WR", url=jump_url, style=discord.ButtonStyle.link))
 
     @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, emoji="✏️")
     async def edit_btn(self, interaction: discord.Interaction, button: Button):
-        # Rimosso il jump_url che causava l'errore TypeError
         await interaction.response.send_modal(
-            WRModal(self.bot, self.attachment, self, interaction.message,
+            WRModal(self.bot, self.attachment, self, self.original_message,
                     is_edit=True, update_message=self.update_message,
                     def_b=self.def_b, def_t=self.def_t, def_p=self.def_p) 
         )
 
+    # NUOVO TASTO: ANNULLA / REJECT
+    @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def undo_btn(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=True)
+        
+        # 1. Elimina il log dal canale aggiornamenti
+        try:
+            await self.update_message.delete()
+        except:
+            pass
+            
+        # 2. Manda in rejected-screens
+        rejected_channel = self.bot.get_channel(config.REJECT_CHANNEL_ID)
+        author_mention = self.original_message.mentions[0].mention if self.original_message.mentions else "l'utente"
+        if rejected_channel and self.attachment:
+            file_to_send = await self.attachment.to_file()
+            await rejected_channel.send(content=f"Screen rifiutato (dopo annullamento) da {author_mention}:", file=file_to_send)
+
+        # 3. Disabilita i bottoni e aggiorna il testo del messaggio originale
+        for child in self.children:
+            child.disabled = True
+        new_content = self.original_message.content.replace("**Accepted ✅**", "**Rejected ❌ (Annullato)**")
+        await self.original_message.edit(content=new_content, view=self)
+        await self.original_message.delete(delay=20)
+        
+        # 4. Forza l'aggiornamento della classifica per ricalcolare i delta
+        await rankings.trigger_ranking_update(self.bot)
+        
+        await interaction.followup.send("✅ Record annullato! Il log è stato eliminato e la classifica verrà ricalcolata.", ephemeral=True)
+
 # --- VIEW PER IL TASTO EDIT (WR ROUNDS) ---
 class EditRoundView(View):
-    def __init__(self, bot, attachment, update_message, def_r, def_w, def_o):
+    def __init__(self, bot, attachment, update_message, def_r, def_w, def_o, original_message):
         super().__init__(timeout=None)
         self.bot = bot
         self.attachment = attachment
@@ -38,14 +67,38 @@ class EditRoundView(View):
         self.def_r = def_r
         self.def_w = def_w
         self.def_o = def_o
+        self.original_message = original_message
 
     @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, emoji="✏️")
     async def edit_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(
-            WrRoundModal(self.bot, self.attachment, self, interaction.message,
+            WrRoundModal(self.bot, self.attachment, self, self.original_message,
                          is_edit=True, update_message=self.update_message,
                          def_r=self.def_r, def_w=self.def_w, def_o=self.def_o)
         )
+
+    # NUOVO TASTO: ANNULLA / REJECT
+    @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def undo_btn(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self.update_message.delete()
+        except:
+            pass
+            
+        rejected_channel = self.bot.get_channel(config.REJECT_CHANNEL_ID)
+        author_mention = self.original_message.mentions[0].mention if self.original_message.mentions else "l'utente"
+        if rejected_channel and self.attachment:
+            file_to_send = await self.attachment.to_file()
+            await rejected_channel.send(content=f"Screen rifiutato (dopo annullamento) da {author_mention}:", file=file_to_send)
+
+        for child in self.children:
+            child.disabled = True
+        new_content = self.original_message.content.replace("**Accepted ✅**", "**Rejected ❌ (Annullato)**")
+        await self.original_message.edit(content=new_content, view=self)
+        await self.original_message.delete(delay=20)
+        
+        await interaction.followup.send("✅ Record annullato! Il log è stato eliminato.", ephemeral=True)
 
 # --- MODAL PER I WR ROUND ---
 class WrRoundModal(Modal):
@@ -67,7 +120,6 @@ class WrRoundModal(Modal):
         self.add_item(self.opponent_name)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Mettiamo in attesa Discord prima di fare qualsiasi calcolo
         await interaction.response.defer(ephemeral=True)
         
         try:
@@ -96,7 +148,6 @@ class WrRoundModal(Modal):
             self.original_view.def_w = self.winner_name.value
             self.original_view.def_o = self.opponent_name.value
             
-            # Usiamo original_message.edit per non far arrabbiare Discord
             await self.original_message.edit(view=self.original_view)
             await interaction.followup.send("✅ Modifica salvata con successo!", ephemeral=True)
             
@@ -105,7 +156,7 @@ class WrRoundModal(Modal):
             file_da_inviare = await self.attachment.to_file()
             update_msg = await channel.send(content=testo_record, file=file_da_inviare)
 
-            edit_view = EditRoundView(self.bot, self.attachment, update_msg, self.rounds_val.value, self.winner_name.value, self.opponent_name.value)
+            edit_view = EditRoundView(self.bot, self.attachment, update_msg, self.rounds_val.value, self.winner_name.value, self.opponent_name.value, self.original_message)
             
             new_content = f"{self.original_message.content} - **Accepted ✅**"
             await self.original_message.edit(content=new_content, view=edit_view)
@@ -124,13 +175,11 @@ class SimWrModal(Modal, title='Cerca link per Sim WR'):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         
-        # Disabilita i bottoni e aggiorna il testo
         for child in self.original_view.children:
             child.disabled = True
         new_content = f"{self.original_message.content} - **Sim WR 🔄**"
         await self.original_message.edit(content=new_content, view=self.original_view)
         
-        # ELIMINA IL MESSAGGIO DOPO 30 SECONDI
         await self.original_message.delete(delay=30)
         
         build_key = self.build_name.value.lower().strip()
@@ -161,7 +210,6 @@ class WRModal(Modal):
         self.add_item(self.player_name)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Mettiamo subito in pausa Discord!
         await interaction.response.defer(ephemeral=True)
         
         build_key = self.build_name.value.lower().strip()
@@ -234,7 +282,6 @@ class WRModal(Modal):
             self.original_view.def_p = self.player_name.value
             
             await self.original_message.edit(view=self.original_view)
-            # In fondo alla WRModal, dentro la parte if self.is_edit:
             await interaction.followup.send(f"✅ Modifica salvata!\n🔗 **Ricorda, per aggiornare la list dei wr:** {jump_url}", ephemeral=True)
             
         else:
@@ -242,8 +289,7 @@ class WRModal(Modal):
             file_da_inviare = await self.attachment.to_file()
             update_msg = await channel.send(content=testo_record, file=file_da_inviare)
 
-            # Cerca questa riga nel WRModal (intorno alla riga 170) e modificala così:
-            edit_view = EditWRView(self.bot, self.attachment, update_msg, self.build_name.value, self.time_val.value, self.player_name.value, jump_url)
+            edit_view = EditWRView(self.bot, self.attachment, update_msg, self.build_name.value, self.time_val.value, self.player_name.value, jump_url, self.original_message)
             
             new_content = f"{self.original_message.content} - **Accepted ✅**"
             await self.original_message.edit(content=new_content, view=edit_view)
@@ -252,47 +298,48 @@ class WRModal(Modal):
                 await interaction.followup.send(f"✅ Record aggiornato con successo!\n🔗 **Clicca qui per aggiornare la lista dei wr:** {jump_url}", ephemeral=True)
             else:
                 await interaction.followup.send("✅ Record aggiornato con successo!\n⚠️ *(Questa sembra una build nuova, non ho link da darti)*", ephemeral=True)
-# --- AGGIORNAMENTO AUTOMATICO RANKING ---
+
         await rankings.trigger_ranking_update(self.bot)
+        await rankings.trigger_rounds_update(self.bot)
 
-# --- BOTTONI SOTTO LO SCREEN ---
+# --- BOTTONI SOTTO LO SCREEN (RESI IMMORTALI) ---
 class ReviewView(View):
-    def __init__(self, bot, attachment, original_author):
-        super().__init__(timeout=None)
-        self.bot = bot
-        self.attachment = attachment
-        self.original_author = original_author
+    def __init__(self):
+        # timeout=None è la chiave dell'immortalità
+        super().__init__(timeout=None) 
 
-    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
+    # Assegnando un custom_id fisso a ogni bottone, Discord sa sempre cosa premere!
+    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success, custom_id="btn_accept_review")
     async def accept_btn(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(WRModal(self.bot, self.attachment, self, interaction.message))
+        # Estraiamo dinamicamente l'immagine dal messaggio senza tenerla in memoria
+        attachment = interaction.message.attachments[0] if interaction.message.attachments else None
+        await interaction.response.send_modal(WRModal(interaction.client, attachment, self, interaction.message))
 
-    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, custom_id="btn_reject_review")
     async def reject_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
         
-        # Cerca il canale #rejected-screens
-        rejected_channel = self.bot.get_channel(config.REJECT_CHANNEL_ID)
+        rejected_channel = interaction.client.get_channel(config.REJECT_CHANNEL_ID)
+        attachment = interaction.message.attachments[0] if interaction.message.attachments else None
+        author_mention = interaction.message.mentions[0].mention if interaction.message.mentions else "l'utente"
         
-        file_to_send = await self.attachment.to_file()
-        if rejected_channel:
-            await rejected_channel.send(content=f"Screen rifiutato da {self.original_author.mention}:", file=file_to_send)
+        if rejected_channel and attachment:
+            file_to_send = await attachment.to_file()
+            await rejected_channel.send(content=f"Screen rifiutato da {author_mention}:", file=file_to_send)
         
         for child in self.children:
             child.disabled = True
         new_content = f"{interaction.message.content} - **Rejected ❌**"
         await interaction.message.edit(content=new_content, view=self)
         
-        # --- ELIMINAZIONE AUTOMATICA DOPO 30 SECONDI ---
         await interaction.message.delete(delay=20)
-        
-        # --- MESSAGGIO CON LINK CLICCABILE AL CANALE ---
         await interaction.followup.send(f"Screen rifiutato. È stato spostato in <#{config.REJECT_CHANNEL_ID}>.", ephemeral=True)
 
-    @discord.ui.button(label="Wr Round", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="Wr Round", style=discord.ButtonStyle.primary, custom_id="btn_round_review")
     async def round_btn(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(WrRoundModal(self.bot, self.attachment, self, interaction.message))
+        attachment = interaction.message.attachments[0] if interaction.message.attachments else None
+        await interaction.response.send_modal(WrRoundModal(interaction.client, attachment, self, interaction.message))
 
-    @discord.ui.button(label="Sim Wr", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Sim Wr", style=discord.ButtonStyle.secondary, custom_id="btn_sim_review")
     async def sim_wr_btn(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(SimWrModal(self.bot, self, interaction.message))
+        await interaction.response.send_modal(SimWrModal(interaction.client, self, interaction.message))

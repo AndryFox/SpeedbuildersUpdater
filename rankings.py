@@ -160,6 +160,40 @@ async def trigger_ranking_update(bot):
         webhook = discord.Webhook.from_url(config.RANKINGS_WEBHOOK_URL, session=session)
         await webhook.edit_message(config.RANKING_WR_MSG_ID, content=new_text)
 
+async def generate_rounds_ranking_text(bot) -> str:
+    db_channel = bot.get_channel(config.DATABASE_CHANNEL_ID)
+    testo_rounds = f"## ⚔️ Ranking Fear Games WR Rounds (Updated <t:{int(time.time())}:d>)\n\n"
+    
+    rounds_trovati = []
+    
+    # Scansioniamo il database cercando specificamente i record dei round
+    async for message in db_channel.history(limit=None, oldest_first=True):
+        for line in message.content.split('\n'):
+            line_str = line.strip()
+            # Intercettiamo le righe che parlano di "Rounds" o contengono i timestamp specifici
+            if "rounds" in line_str.lower():
+                # Rimuoviamo il blocco di codice fix per renderlo pulito nell'embed
+                clean_line = line_str.replace("```fix", "").replace("```", "").strip()
+                if clean_line:
+                    rounds_trovati.append(f"▸ {clean_line}")
+                
+    if rounds_trovati:
+        testo_rounds += "\n\n".join(rounds_trovati)
+    else:
+        testo_rounds += "*Nessun record per i round trovato al momento.*"
+        
+    return testo_rounds
+
+async def trigger_rounds_update(bot):
+    if not hasattr(config, 'RANKING_ROUNDS_MSG_ID') or not config.RANKING_ROUNDS_MSG_ID:
+        return
+    
+    new_text = await generate_rounds_ranking_text(bot)
+    
+    async with aiohttp.ClientSession() as session:
+        webhook = discord.Webhook.from_url(config.RANKINGS_WEBHOOK_URL, session=session)
+        await webhook.edit_message(config.RANKING_ROUNDS_MSG_ID, content=new_text)
+
 def setup_rankings_commands(bot):
     bot.loop.create_task(generate_wr_ranking_text(bot))
 
@@ -180,6 +214,17 @@ def setup_rankings_commands(bot):
             for player in PLAYERS_CACHE if current.lower() in player.lower()
         ]
         return choices[:25] 
+
+    @bot.tree.command(name="setup_rounds", description="Send the initial WR Rounds message")
+    async def setup_rounds(interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        initial_text = await generate_rounds_ranking_text(bot)
+        
+        async with aiohttp.ClientSession() as session:
+            webhook = discord.Webhook.from_url(config.RANKINGS_WEBHOOK_URL, session=session)
+            msg = await webhook.send(content=initial_text, username="Rankings Updater", wait=True)
+            
+        await interaction.followup.send(f"✅ Ranking Rounds created! Copy this ID into config.py:\n**{msg.id}**")
 
     @bot.tree.command(name="wrs", description="Check all WRs and times of a player (visible only to you)")
     @app_commands.describe(player="The name of the player to search")
