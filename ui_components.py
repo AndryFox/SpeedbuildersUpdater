@@ -50,9 +50,26 @@ class EditWRView(View):
         await rankings.trigger_ranking_update(self.bot)
         await interaction.followup.send("✅ Record annullato! Il log è stato eliminato e la classifica verrà ricalcolata.", ephemeral=True)
 
-# --- VIEW PER IL TASTO EDIT (WR ROUNDS) ---
+# --- NUOVA MODAL PER IL LINK IMGUR ---
+class ImgurModal(Modal, title="Inserisci Link Imgur"):
+    imgur_link = TextInput(label="Link Imgur", placeholder="https://imgur.com/a/...", required=True)
+
+    def __init__(self, bot, update_message, original_message):
+        super().__init__()
+        self.bot = bot
+        self.update_message = update_message
+        self.original_message = original_message
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        # Aggiunge il link in fondo al messaggio di log in #wrs-updated
+        new_content = self.update_message.content + f"\n🔗 **Imgur:** <{self.imgur_link.value.strip()}>"
+        await self.update_message.edit(content=new_content)
+        await interaction.followup.send("✅ Link Imgur aggiunto con successo al record!", ephemeral=True)
+
+# --- VIEW PER IL TASTO EDIT (WR ROUNDS) AGGIORNATA ---
 class EditRoundView(View):
-    def __init__(self, bot, attachment, update_message, def_r, def_w, def_o, original_message):
+    def __init__(self, bot, attachment, update_message, def_r, def_w, def_o, def_t, original_message):
         super().__init__(timeout=None)
         self.bot = bot
         self.attachment = attachment
@@ -60,6 +77,7 @@ class EditRoundView(View):
         self.def_r = def_r
         self.def_w = def_w
         self.def_o = def_o
+        self.def_t = def_t # Manteniamo in memoria anche il timestamp
         self.original_message = original_message
 
     @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, emoji="✏️")
@@ -67,8 +85,13 @@ class EditRoundView(View):
         await interaction.response.send_modal(
             WrRoundModal(self.bot, self.attachment, self, self.original_message,
                          is_edit=True, update_message=self.update_message,
-                         def_r=self.def_r, def_w=self.def_w, def_o=self.def_o)
+                         def_r=self.def_r, def_w=self.def_w, def_o=self.def_o, def_t=self.def_t)
         )
+
+    # NUOVO BOTTONE IMGUR
+    @discord.ui.button(label="Add Imgur", style=discord.ButtonStyle.secondary, emoji="🔗")
+    async def imgur_btn(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(ImgurModal(self.bot, self.update_message, self.original_message))
 
     @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def undo_btn(self, interaction: discord.Interaction, button: Button):
@@ -92,9 +115,9 @@ class EditRoundView(View):
         
         await interaction.followup.send("✅ Record annullato! Il log è stato eliminato.", ephemeral=True)
 
-# --- MODAL PER I WR ROUND ---
+# --- MODAL PER I WR ROUND AGGIORNATA ---
 class WrRoundModal(Modal):
-    def __init__(self, bot, attachment, original_view, original_message, is_edit=False, update_message=None, def_r="", def_w="", def_o=""):
+    def __init__(self, bot, attachment, original_view, original_message, is_edit=False, update_message=None, def_r="", def_w="", def_o="", def_t=""):
         super().__init__(title='Edit WR Rounds' if is_edit else 'Aggiornamento WR Rounds')
         self.bot = bot
         self.attachment = attachment
@@ -105,14 +128,18 @@ class WrRoundModal(Modal):
 
         self.rounds_val = TextInput(label='Numero di Round', placeholder='Es. 42', default=def_r, required=True)
         self.winner_name = TextInput(label='Nome Vincitore', placeholder='Es. Lorenz223', default=def_w, required=True)
-        self.opponent_name = TextInput(label='Nome Avversario', placeholder='Es. blaagoosb', default=def_o, required=True)
+        self.opponent_name = TextInput(label='Nome Avversario', placeholder='Es. Boxato', default=def_o, required=True)
+        # NUOVO CAMPO TIMESTAMP
+        self.timestamp_val = TextInput(label='Timestamp (es. 1780327920)', placeholder='Lascia vuoto per usare ora attuale', default=def_t, required=False)
 
         self.add_item(self.rounds_val)
         self.add_item(self.winner_name)
         self.add_item(self.opponent_name)
+        self.add_item(self.timestamp_val)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        import time
         
         try:
             new_rounds = int(self.rounds_val.value)
@@ -120,18 +147,17 @@ class WrRoundModal(Modal):
             new_rounds = 0
 
         current_team = f"{self.winner_name.value.strip()} & {self.opponent_name.value.strip()}"
-        old_rounds, old_holders = await get_wr_rounds_info(self.bot)
+        
+        # Logica Timestamp: se lo lasci vuoto, prende il momento in cui premi submit
+        ts_input = self.timestamp_val.value.strip()
+        if not ts_input:
+            ts_input = str(int(time.time()))
+        else:
+            # Pulisce eventuali lettere inserite per sbaglio
+            ts_input = "".join([c for c in ts_input if c.isdigit()])
 
-        extra_message = ""
-        if old_rounds > 0:
-            if new_rounds > old_rounds:
-                diff = new_rounds - old_rounds
-                round_word = "round" if diff == 1 else "rounds"
-                extra_message = f"\n{current_team} beat {old_holders}'s old wr by {diff} {round_word}"
-            elif new_rounds == old_rounds:
-                extra_message = f"\n{current_team} tied {old_holders}'s wr"
-
-        testo_record = f'```fix\nWR Rounds (Legit): {new_rounds} Rounds - {current_team}{extra_message}\n```'
+        # Nuovo stile del log in #wrs-updated pronto per essere letto o copiato
+        testo_record = f"**WR Rounds (Legit)**\nRounds: **{new_rounds}**\nTeam: **{current_team}**\nTimestamp: <t:{ts_input}:F>"
 
         if self.is_edit:
             await self.update_message.edit(content=testo_record)
@@ -139,6 +165,7 @@ class WrRoundModal(Modal):
             self.original_view.def_r = self.rounds_val.value
             self.original_view.def_w = self.winner_name.value
             self.original_view.def_o = self.opponent_name.value
+            self.original_view.def_t = ts_input
             
             await self.original_message.edit(view=self.original_view)
             await interaction.followup.send("✅ Modifica salvata con successo!", ephemeral=True)
@@ -148,11 +175,11 @@ class WrRoundModal(Modal):
             file_da_inviare = await self.attachment.to_file()
             update_msg = await channel.send(content=testo_record, file=file_da_inviare)
 
-            edit_view = EditRoundView(self.bot, self.attachment, update_msg, self.rounds_val.value, self.winner_name.value, self.opponent_name.value, self.original_message)
+            edit_view = EditRoundView(self.bot, self.attachment, update_msg, self.rounds_val.value, self.winner_name.value, self.opponent_name.value, ts_input, self.original_message)
             
             new_content = f"{self.original_message.content} - **Accepted ✅**"
             await self.original_message.edit(content=new_content, view=edit_view)
-            await interaction.followup.send("✅ WR Rounds inviato! (Ricorda di aggiornare manualmente la classifica)", ephemeral=True)
+            await interaction.followup.send("✅ WR Rounds inviato! (Ora puoi aggiungere il link Imgur dal bottone in chat)", ephemeral=True)
 
 # --- MODAL PER SIM WR ---
 class SimWrModal(Modal, title='Cerca link per Sim WR'):
