@@ -111,50 +111,33 @@ async def update_wr_rounds_database(bot, new_rounds, new_team, image_url):
     # Salva il nuovo testo nel messaggio database
     await msg.edit(content=new_text)
 
-# --- ORA LA FUNZIONE ACCETTA IL CANALE COME PARAMETRO (channel_id) ---
-async def get_wr_from_database(bot, build_name, channel_id=None):
-    # Se non forniamo il canale (es. nei wr normali), usa il database classico
-    if channel_id is None:
-        channel_id = config.DATABASE_CHANNEL_ID
-        
-    channel = bot.get_channel(channel_id)
-    
+async def get_wr_rounds_info(bot):
+    channel = bot.get_channel(config.RANKINGS_CHANNEL_ID)
     if not channel:
-        print("ERRORE: Il bot non riesce a vedere il canale database!")
-        return None, None, None
-        
-    build_clean = build_name.lower().strip()
-    
-    async for message in channel.history(limit=500):
+        return 0, "Sconosciuto"
+
+    async for message in channel.history(limit=50):
         if not message.content:
             continue
-            
+
         lines = message.content.split('\n')
         for i, line in enumerate(lines):
-            clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").strip()
-            
-            if clean_line.startswith("build:") and build_clean in clean_line:
-                for j in range(i + 1, min(i + 4, len(lines))):
-                    top_line = lines[j]
-                    top_line = top_line.replace(">", "").replace("_", "").replace("*", "").replace("~", "").strip()
-                    top_line = top_line.replace("–", "-").replace("—", "-")
-                    
-                    if "-" in top_line:
-                        data_str = top_line.split("-", 1)[1].strip() 
-                        
-                        if data_str != "": 
-                            parts = data_str.rsplit(' ', 1)
-                            if len(parts) == 2:
-                                player = parts[0].strip()
-                                time_str = parts[1].lower().replace("s", "").replace("sec", "").strip()
-                                
-                                try:
-                                    time_val = float(time_str)
-                                    return player, time_val, message.jump_url
-                                except ValueError:
-                                    pass
+            if ":first_place:" in line and "Rounds" in line:
+                match = re.search(r'(\d+)\s*Rounds', line, re.IGNORECASE)
+                old_rounds = int(match.group(1)) if match else 0
+
+                old_holders = []
+                for j in range(i+1, min(i+10, len(lines))):
+                    if ":second_place:" in lines[j] or ":third_place:" in lines[j]:
                         break
-    return None, None, None
+                    if "|" in lines[j] and "[" in lines[j] and "]" in lines[j]:
+                        holder_match = re.search(r'\[(.*?)\]', lines[j])
+                        if holder_match:
+                            old_holders.append(holder_match.group(1).replace("&amp;", "&").strip())
+
+                holders_str = " / ".join(old_holders) if old_holders else "Sconosciuto"
+                return old_rounds, holders_str
+    return 0, "Sconosciuto"
 
 # --- NUOVA FUNZIONE DEDICATA SOLO AI SIM WR ---
 async def get_sim_wr_link(bot, build_name):
