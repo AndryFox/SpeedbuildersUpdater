@@ -22,16 +22,20 @@ class ImgurModal(Modal, title="Inserisci Link Imgur"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         
-        # Aggiunge il link al log in chat
-        new_content = self.update_message.content + f"\n🔗 **Imgur:** <{self.imgur_link.value.strip()}>"
-        await self.update_message.edit(content=new_content)
-        
-        # Aggiorna la classifica pubblica!
+        # Saltiamo la modifica del log su #wrs-updated.
+        # Andiamo diretti ad aggiornare la classifica pubblica!
         current_team = f"{self.def_w.strip()} & {self.def_o.strip()}"
         rounds_int = int(self.def_r) if str(self.def_r).isdigit() else 0
-        await rankings.add_or_update_round_record(self.bot, rounds_int, current_team, self.def_t, self.imgur_link.value.strip())
         
-        await interaction.followup.send("✅ Link Imgur aggiunto e classifica aggiornata!", ephemeral=True)
+        await rankings.add_or_update_round_record(
+            self.bot, 
+            rounds_int, 
+            current_team, 
+            self.def_t, 
+            self.imgur_link.value.strip()
+        )
+        
+        await interaction.followup.send("✅ Link Imgur aggiunto e classifica aggiornata in automatico!", ephemeral=True)
 
 # --- VIEW PER IL TASTO EDIT (WR ROUNDS) ---
 class EditRoundView(View):
