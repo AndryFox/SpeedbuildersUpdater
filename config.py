@@ -35,7 +35,7 @@ RANKING_ROUNDS_MSG_ID = 1536732528776585317
 # --- DATABASE ROUNDS ---
 ROUNDS_DB_CHANNEL_ID = 935822009097670676
 # ID del singolo messaggio in quel canale in cui scriverai i primi 5 record iniziali
-ROUNDS_DB_MSG_ID = 1536760669666287687 # Sostituisci con l'ID reale del messaggio
+ROUNDS_DB_MSG_ID = 1536696488380473424 # Sostituisci con l'ID reale del messaggio
 
 # --- ID RUOLI (Per i tag colorati nelle classifiche) ---
 ROLE_SPEEDBUILDERS = "<@&1052359365803393124>" # Se è un ruolo, assicurati che abbia la & così: <@&1252708950105657355>
