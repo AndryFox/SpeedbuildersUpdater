@@ -50,6 +50,13 @@ class EditRoundView(View):
         self.def_t = def_t 
         self.original_message = original_message
 
+    # INSERISCI QUESTO BUTTAFUORI:
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != config.MIO_ID:
+            await interaction.response.send_message("❌ Solo l'amministratore può modificare i record.", ephemeral=True)
+            return False
+        return True
+
     @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, emoji="✏️")
     async def edit_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(
@@ -153,6 +160,13 @@ class EditWRView(View):
         self.def_p = def_p
         self.original_message = original_message
         if jump_url: self.add_item(discord.ui.Button(label="Go to WR", url=jump_url, style=discord.ButtonStyle.link))
+
+    # INSERISCI QUESTO BUTTAFUORI:
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != config.MIO_ID:
+            await interaction.response.send_message("❌ Solo l'amministratore può modificare i record.", ephemeral=True)
+            return False
+        return True
 
     @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, emoji="✏️")
     async def edit_btn(self, interaction: discord.Interaction, button: Button):
@@ -292,6 +306,13 @@ class WRModal(Modal):
 class ReviewView(View):
     def __init__(self):
         super().__init__(timeout=None) 
+
+    # INSERISCI QUESTO BUTTAFUORI:
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != config.MIO_ID:
+            await interaction.response.send_message("❌ Solo l'amministratore può approvare o rifiutare gli screen.", ephemeral=True)
+            return False
+        return True
 
     @discord.ui.button(label="Accept", style=discord.ButtonStyle.success, custom_id="btn_accept_review")
     async def accept_btn(self, interaction: discord.Interaction, button: Button):
