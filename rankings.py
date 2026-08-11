@@ -227,28 +227,36 @@ def setup_rankings_commands(bot):
     bot.loop.create_task(generate_wr_ranking_text(bot))
 
     @bot.tree.command(name="setup_rankings", description="Send the initial WR Ranking message")
+    @app_commands.default_permissions(administrator=True) # Nasconde il comando agli utenti normali
     async def setup_rankings(interaction: discord.Interaction):
+        # Blocco di sicurezza: se l'ID non è il tuo, blocca l'esecuzione
+        if interaction.user.id != config.MIO_ID:
+            return await interaction.response.send_message("❌ Questo comando è riservato allo sviluppatore.", ephemeral=True)
+            
         await interaction.response.defer(ephemeral=True)
         initial_text = await generate_wr_ranking_text(bot)
+        
         async with aiohttp.ClientSession() as session:
             webhook = discord.Webhook.from_url(config.RANKINGS_WEBHOOK_URL, session=session)
             msg = await webhook.send(content=initial_text, username="Rankings Updater", wait=True)
+            
         await interaction.followup.send(f"✅ Ranking created! Copy this ID into config.py:\n**{msg.id}**")
 
-    async def player_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        choices = [
-            app_commands.Choice(name=player, value=player)
-            for player in PLAYERS_CACHE if current.lower() in player.lower()
-        ]
-        return choices[:25] 
 
     @bot.tree.command(name="setup_rounds", description="Send the initial WR Rounds message")
+    @app_commands.default_permissions(administrator=True) # Nasconde il comando agli utenti normali
     async def setup_rounds(interaction: discord.Interaction):
+        # Blocco di sicurezza: se l'ID non è il tuo, blocca l'esecuzione
+        if interaction.user.id != config.MIO_ID:
+            return await interaction.response.send_message("❌ Questo comando è riservato allo sviluppatore.", ephemeral=True)
+            
         await interaction.response.defer(ephemeral=True)
         initial_text = "## In total Fear Games have: __140 Builds__\n\nThe Wr rounds **(Legit)** on Fear Games is:\n\n||@Speedbuilders||"
+        
         async with aiohttp.ClientSession() as session:
             webhook = discord.Webhook.from_url(config.RANKINGS_WEBHOOK_URL, session=session)
             msg = await webhook.send(content=initial_text, username="Rankings Updater", wait=True)
+            
         await interaction.followup.send(f"✅ Ranking Rounds created! Copy this ID into config.py:\n**{msg.id}**")
 
     @bot.tree.command(name="wrs", description="Check all WRs and times of a player (visible only to you)")
