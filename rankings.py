@@ -191,8 +191,8 @@ async def generate_rounds_ranking_text(bot) -> str:
                 is_parsing_rounds = True
                 continue 
                 
-            # Interruttore OFF: fine del messaggio
-            if "||@Speedbuilders||" in line_str:
+            # Interruttore OFF: intercetta qualsiasi variante del tag o ID numerico
+            if "speedbuilders" in line_str.lower() or "<@&" in line_str:
                 is_parsing_rounds = False
                 continue
                 
