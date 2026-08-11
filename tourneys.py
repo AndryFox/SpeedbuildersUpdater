@@ -34,8 +34,8 @@ def setup_tourney_commands(bot):
 
     # --- 2. COMMAND TO ADD A ROLE ---
     @bot.tree.command(name="addrole", description="Aggiunge un ruolo a un utente")
-    @app_commands.default_permissions(administrator=True) # Nasconde il comando agli utenti normali
-    async def addrole(interaction: discord.Interaction, user: discord.Member, role: discord.Role):
+    @app_commands.default_permissions(administrator=True)
+    async def addrole(interaction: discord.Interaction, ruolo: discord.Role, player: discord.Member):
         # Blocco di sicurezza
         if interaction.user.id != config.MIO_ID:
             return await interaction.response.send_message("❌ Questo comando è riservato allo sviluppatore.", ephemeral=True)
@@ -43,17 +43,17 @@ def setup_tourney_commands(bot):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            await user.add_roles(role)
-            await interaction.followup.send(f"✅ Ruolo {role.mention} aggiunto a {user.mention} con successo!")
+            await player.add_roles(ruolo)
+            await interaction.followup.send(f"✅ Ruolo {ruolo.mention} aggiunto a {player.mention} con successo!")
         except discord.Forbidden:
-            await interaction.followup.send("⚠️ Errore: Il bot non ha i permessi per assegnare questo ruolo (assicurati che il ruolo del bot sia più in alto nella gerarchia di Discord).")
+            await interaction.followup.send("⚠️ Errore: Il bot non ha i permessi per assegnare questo ruolo (assicurati che il ruolo del bot sia più in alto nella gerarchia).")
         except Exception as e:
             await interaction.followup.send(f"⚠️ Si è verificato un errore imprevisto: {e}")
 
     # --- 3. COMMAND TO REMOVE A ROLE ---
     @bot.tree.command(name="removerole", description="Rimuove un ruolo a un utente")
-    @app_commands.default_permissions(administrator=True) # Nasconde il comando agli utenti normali
-    async def removerole(interaction: discord.Interaction, user: discord.Member, role: discord.Role):
+    @app_commands.default_permissions(administrator=True)
+    async def removerole(interaction: discord.Interaction, ruolo: discord.Role, player: discord.Member):
         # Blocco di sicurezza
         if interaction.user.id != config.MIO_ID:
             return await interaction.response.send_message("❌ Questo comando è riservato allo sviluppatore.", ephemeral=True)
@@ -61,8 +61,8 @@ def setup_tourney_commands(bot):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            await user.remove_roles(role)
-            await interaction.followup.send(f"✅ Ruolo {role.mention} rimosso da {user.mention} con successo!")
+            await player.remove_roles(ruolo)
+            await interaction.followup.send(f"✅ Ruolo {ruolo.mention} rimosso da {player.mention} con successo!")
         except discord.Forbidden:
             await interaction.followup.send("⚠️ Errore: Il bot non ha i permessi per rimuovere questo ruolo.")
         except Exception as e:
