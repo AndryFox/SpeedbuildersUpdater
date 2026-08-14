@@ -323,12 +323,6 @@ class WRModal(Modal):
             old_counts = {}
             for p in players_to_check:
                 old_counts[p] = await get_wr_count(self.bot, p)
-                
-            # --- NUOVA RIGA: ELIMINA IL VECCHIO TEMPO DELLO STESSO GIOCATORE ---
-            await db.execute(
-                "DELETE FROM WorldRecords WHERE build_name = ? COLLATE NOCASE AND player_name = ? COLLATE NOCASE", 
-                (build_key, current_player)
-            )
 
             # INSERISCE IL NUOVO RECORD NEL DATABASE
             await db.execute("INSERT INTO WorldRecords (build_name, player_name, time) VALUES (?, ?, ?)", (build_key, current_player, new_time))
