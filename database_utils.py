@@ -9,51 +9,28 @@ def get_main_name(name):
 async def get_wr_count(bot, player_name):
     """
     Interroga il database per contare quanti primi posti (WR) possiede un giocatore.
-    Manteniamo 'bot' come parametro per non rompere il codice esistente in altri file,
-    anche se ora usiamo direttamente aiosqlite.
+    Questa versione applica correttamente gli ALIAS.
     """
-    async with aiosqlite.connect("speedbuilders.db") as db:
-        query = """
-            SELECT COUNT(*) 
-            FROM WorldRecords r1
-            WHERE player_name = ? COLLATE NOCASE
-            AND time = (SELECT MIN(time) FROM WorldRecords r2 WHERE r1.build_name = r2.build_name)
-        """
-        async with db.execute(query, (player_name,)) as cursor:
-            result = await cursor.fetchone()
-            return result[0] if result else 0
-    channel = bot.get_channel(config.RANKINGS_CHANNEL_ID)
-    if not channel:
-        return 0
-        
-    p_lower = player_name.lower().strip()
+    target_name = get_main_name(player_name)
+    count = 0
     
-    async for message in channel.history(limit=50):
-        if not message.content:
-            continue
+    async with aiosqlite.connect("speedbuilders.db") as db:
+        # Peschiamo TUTTI i nomi che attualmente detengono un WR
+        query = """
+            SELECT player_name 
+            FROM WorldRecords r1
+            WHERE time = (SELECT MIN(time) 
+            FROM WorldRecords r2 WHERE r1.build_name = r2.build_name)
+        """
+        async with db.execute(query) as cursor:
+            rows = await cursor.fetchall()
             
-        lines = message.content.split('\n')
-        for line in lines:
-            line_lower = line.lower()
-            
-            if ":" in line_lower and "wr" in line_lower:
-                # Usa rsplit per dividere la frase all'ULTIMO due punti (ignora le emoji :first_place:)
-                parts = line_lower.rsplit(":", 1)
-                
-                if len(parts) < 2:
-                    continue
+            # Contiamo a mano applicando il sistema degli alias!
+            for row in rows:
+                if get_main_name(row[0]) == target_name:
+                    count += 1
                     
-                left_part = parts[0]
-                right_part = parts[1]
-                
-                left_clean = left_part.replace("*", "").replace("_", "").replace("~", "").replace("#", "")
-                words = left_clean.replace("/", " ").split()
-                
-                if p_lower in words:
-                    match = re.search(r'(\d+)\s*wr', right_part)
-                    if match:
-                        return int(match.group(1))
-    return 0
+    return count
 
 async def get_wr_rounds_info(bot):
     channel = bot.get_channel(config.RANKINGS_CHANNEL_ID)
