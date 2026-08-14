@@ -50,7 +50,6 @@ async def get_wr_count(bot, player_name):
                 words = left_clean.replace("/", " ").split()
                 
                 if p_lower in words:
-                    import re
                     match = re.search(r'(\d+)\s*wr', right_part)
                     if match:
                         return int(match.group(1))
@@ -128,7 +127,6 @@ async def generate_build_message(build_name: str) -> str:
     leggendo dal database SQLite, mantenendo i decimali ed effettuando
     l'escaping del Markdown di Discord per nomi speciali (es. _Ilusion_).
     """
-    import aiosqlite # Assicurati che l'import sia globale o nel file
     
     async with aiosqlite.connect("speedbuilders.db") as db:
         query = """
