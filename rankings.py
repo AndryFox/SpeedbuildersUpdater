@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 import config
 import aiohttp
+import aiosqlite
 import time
 from database_utils import get_main_name
 
@@ -41,81 +42,78 @@ def get_ordinal(n: int) -> str:
     return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 async def generate_wr_ranking_text(bot) -> str:
-    global PLAYERS_CACHE, WR_RECORDS_CACHE, DISPLAY_NAMES_CACHE
-    db_channel = bot.get_channel(config.WR_CHANNEL_ID)
-    wr_counts = {}
-    display_names = {} 
-    temp_records_cache = {}
-    current_build_name = "Unknown Build"
+    global PLAYERS_CACHE # Manteniamo la cache dei nomi per l'autocompletamento
     
-    async for message in db_channel.history(limit=None, oldest_first=True):
-        for line in message.content.split('\n'):
-            line_str = line.strip()
-            if not line_str: continue
-            if ("🥇" in line or ":first_place:" in line) and "**__" in line:
-                try:
-                    start = line.find("**__") + 4
-                    end = line.find("__**", start)
-                    if end == -1: end = line.find("**", start)
-                    if end == -1: end = len(line)
-                    content = line[start:end].strip()
-                    parts = content.split()
-                    if len(parts) > 1:
-                        nomi_str = " ".join(parts[:-1])
-                        time_str = parts[-1]
-                    else:
-                        nomi_str = parts[0]
-                        time_str = "?"
-                    idx = line.find("🥇") if "🥇" in line else line.find(":first_place:")
-                    raw_prefix = line[:idx]
-                    build_inline = raw_prefix.replace("**", "").replace(">", "").replace("-", "").replace("•", "").strip()
-                    final_build = build_inline if build_inline else current_build_name
-                    record_entry = f"▸ Build: **{final_build}** ⸻ `{time_str}s`"
-                    nomi_grezzi = [n.strip() for n in nomi_str.split('/') if n.strip()]
-                    
-                    for nome_grezzo in nomi_grezzi:
-                        nome_pulito = nome_grezzo.replace("\\", "")
-                        nome_norm = get_main_name(nome_pulito)
-                        wr_counts[nome_norm] = wr_counts.get(nome_norm, 0) + 1
-                        if nome_norm not in temp_records_cache: temp_records_cache[nome_norm] = []
-                        temp_records_cache[nome_norm].append(record_entry)
-                        if nome_norm not in display_names:
-                            if nome_pulito.lower() != nome_norm.lower(): display_names[nome_norm] = nome_norm
-                            else: display_names[nome_norm] = nome_grezzo
-                except Exception as e: pass
-            elif "🥈" not in line and "🥉" not in line and ":second_place:" not in line and ":third_place:" not in line:
-                cleaned = line_str.replace("**", "").replace("__", "").replace(">", "").strip()
-                if cleaned and len(cleaned) < 40: current_build_name = cleaned
+    wr_counts = {}
+    display_names = {}
+    
+    # 1. Interroghiamo il database istantaneamente
+    async with aiosqlite.connect("speedbuilders.db") as db:
+        # Questa query estrae solo i record che corrispondono al tempo MIN per ogni mappa
+        query = """
+            SELECT player_name
+            FROM WorldRecords r1
+            WHERE time = (SELECT MIN(time) FROM WorldRecords r2 WHERE r1.build_name = r2.build_name)
+        """
+        async with db.execute(query) as cursor:
+            rows = await cursor.fetchall()
+            
+            for row in rows:
+                nome_grezzo = row[0]
+                nome_pulito = nome_grezzo.replace("\\", "")
+                nome_norm = get_main_name(nome_pulito)
+                
+                # Calcola i punteggi (unificando gli alias)
+                wr_counts[nome_norm] = wr_counts.get(nome_norm, 0) + 1
+                
+                # Salva il nome estetico per la classifica
+                if nome_norm not in display_names:
+                    if nome_pulito.lower() != nome_norm.lower(): 
+                        display_names[nome_norm] = nome_norm
+                    else: 
+                        display_names[nome_norm] = nome_grezzo
 
+    # Aggiorna la cache per il comando /wrs
     PLAYERS_CACHE = sorted(list({v.replace("\\", "") for v in display_names.values()}))
-    DISPLAY_NAMES_CACHE = display_names.copy()
-    WR_RECORDS_CACHE = temp_records_cache.copy()
-
+    
+    # 2. Raggruppiamo i giocatori per punteggio (Stessa logica visiva di prima)
     sorted_wrs = sorted(wr_counts.items(), key=lambda x: x[1], reverse=True)
     score_groups = {}
     for player_norm, count in sorted_wrs:
-        if count not in score_groups: score_groups[count] = []
+        if count not in score_groups: 
+            score_groups[count] = []
         nome_estetico = display_names.get(player_norm, player_norm)
+        
+        # --- LA RIGA MAGICA SALVA-CORSIVO ---
+        nome_estetico = nome_estetico.replace("_", "\\_")
+        
         score_groups[count].append(nome_estetico)
         
+    # 3. Generiamo il testo finale formattato
     testo_classifica = f"## Ranking Fear Games WRs (Updated <t:{int(time.time())}:d>)\n"
     posizione = 1
+    
     for count, players in score_groups.items():
         players_str = " / ".join(players)
         role = get_role_tag(count)
         has_quote = "> " if (posizione <= 3) or (posizione % 2 != 0) else ""
         ordinale = get_ordinal(posizione)
         
-        if posizione == 1: riga = f"{has_quote}# :first_place: {ordinale} **__{players_str}__** : {count}Wrs ({role})"
-        elif posizione == 2: riga = f"{has_quote}## :second_place: {ordinale} **{players_str}** : {count}Wrs ({role})"
-        elif posizione == 3: riga = f"{has_quote}### :third_place: {ordinale} {players_str} : {count}Wrs ({role})"
-        else: riga = f"{has_quote}{ordinale} {players_str} : {count}Wrs ({role})"
+        if posizione == 1: 
+            riga = f"{has_quote}# :first_place: {ordinale} **__{players_str}__** : {count}Wrs ({role})"
+        elif posizione == 2: 
+            riga = f"{has_quote}## :second_place: {ordinale} **{players_str}** : {count}Wrs ({role})"
+        elif posizione == 3: 
+            riga = f"{has_quote}### :third_place: {ordinale} {players_str} : {count}Wrs ({role})"
+        else: 
+            riga = f"{has_quote}{ordinale} {players_str} : {count}Wrs ({role})"
                 
         testo_classifica += riga + "\n"
         posizione += 1
         
     tag_speedbuilders = getattr(config, 'ROLE_SPEEDBUILDERS', '|| @Speedbuilders ||')
     testo_classifica += tag_speedbuilders
+    
     return testo_classifica
 
 async def trigger_ranking_update(bot):
@@ -265,10 +263,29 @@ def setup_rankings_commands(bot):
         if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
             return await interaction.response.send_message(f"⚠️ This command can only be used in <#{config.SUBMISSION_CHANNEL_ID}>.", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
-        if not WR_RECORDS_CACHE: await generate_wr_ranking_text(bot)
-            
+        
         player_norm = get_main_name(player.replace("\\", ""))
-        records = WR_RECORDS_CACHE.get(player_norm, [])
+        records = []
+        
+        # Interroga il DB per trovare TUTTI i record e li filtra tramite il sistema di Alias!
+        async with aiosqlite.connect("speedbuilders.db") as db:
+            query = """
+                SELECT r1.build_name, r1.time, r1.player_name
+                FROM WorldRecords r1
+                WHERE r1.time = (SELECT MIN(time) FROM WorldRecords r2 WHERE r1.build_name = r2.build_name)
+                ORDER BY r1.build_name ASC
+            """
+            async with db.execute(query) as cursor:
+                rows = await cursor.fetchall()
+                for row in rows:
+                    build_name = row[0]
+                    time_val = row[1]
+                    player_db = row[2]
+                    
+                    # Controlla se il nome registrato nel DB corrisponde all'alias del giocatore cercato
+                    if get_main_name(player_db) == player_norm:
+                        records.append(f"▸ Build: **{build_name}** ⸻ `{time_val}s`")
+                        
         count = len(records)
         
         if count > 0:
@@ -281,7 +298,8 @@ def setup_rankings_commands(bot):
             embed.set_thumbnail(url=avatar_url)
             
             lista_formattata = "\n".join(records)
-            if len(lista_formattata) > 3900: lista_formattata = lista_formattata[:3900] + "\n\n*... and more (text limit reached)!*"
+            if len(lista_formattata) > 3900: 
+                lista_formattata = lista_formattata[:3900] + "\n\n*... and more (text limit reached)!*"
             embed.description += lista_formattata
             
             icon_url = bot.user.avatar.url if bot.user.avatar else None
