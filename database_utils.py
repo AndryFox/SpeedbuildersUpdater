@@ -132,9 +132,10 @@ async def generate_build_message(build_name: str) -> str:
     
     async with aiosqlite.connect("speedbuilders.db") as db:
         query = """
-            SELECT player_name, time 
+            SELECT player_name, MIN(time) as time 
             FROM WorldRecords 
             WHERE build_name = ? COLLATE NOCASE 
+            GROUP BY player_name COLLATE NOCASE 
             ORDER BY time ASC
         """
         async with db.execute(query, (build_name,)) as cursor:
