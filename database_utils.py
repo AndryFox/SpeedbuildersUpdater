@@ -1,6 +1,6 @@
 import re
 import config
-import aiosqlite
+import asyncpg
 
 def get_main_name(name):
     n = name.lower().strip()
@@ -8,27 +8,29 @@ def get_main_name(name):
 
 async def get_wr_count(bot, player_name):
     """
-    Interroga il database per contare quanti primi posti (WR) possiede un giocatore.
-    Questa versione applica correttamente gli ALIAS.
+    Interroga il database in cloud per contare quanti primi posti (WR) possiede un giocatore.
     """
     target_name = get_main_name(player_name)
     count = 0
     
-    async with aiosqlite.connect("speedbuilders.db") as db:
-        # Peschiamo TUTTI i nomi che attualmente detengono un WR
+    # 1. Apriamo la connessione con Supabase
+    conn = await asyncpg.connect(config.DATABASE_URL)
+    try:
         query = """
             SELECT player_name 
             FROM WorldRecords r1
-            WHERE time = (SELECT MIN(time) 
-            FROM WorldRecords r2 WHERE r1.build_name = r2.build_name)
+            WHERE time = (SELECT MIN(time) FROM WorldRecords r2 WHERE LOWER(r1.build_name) = LOWER(r2.build_name))
         """
-        async with db.execute(query) as cursor:
-            rows = await cursor.fetchall()
-            
-            # Contiamo a mano applicando il sistema degli alias!
-            for row in rows:
-                if get_main_name(row[0]) == target_name:
-                    count += 1
+        # 2. asyncpg usa 'fetch' invece di 'execute' + 'fetchall'
+        rows = await conn.fetch(query)
+        
+        for row in rows:
+            # In asyncpg i risultati funzionano come i dizionari
+            if get_main_name(row['player_name']) == target_name:
+                count += 1
+    finally:
+        # 3. Chiudiamo sempre la connessione alla fine!
+        await conn.close()
                     
     return count
 
@@ -83,43 +85,45 @@ async def get_sim_wr_link(bot, build_name):
 async def get_top_players(limit=15):
     """
     Calcola la classifica generale leggendo direttamente chi detiene i primi posti.
-    Restituisce una lista di tuple: [('Giocatore1', 10), ('Giocatore2', 8), ...]
     """
-    async with aiosqlite.connect("speedbuilders.db") as db:
+    conn = await asyncpg.connect(config.DATABASE_URL)
+    try:
+        # Il limit ora usa $1
         query = """
             SELECT player_name, COUNT(*) as wr_count 
             FROM WorldRecords r1
-            WHERE time = (SELECT MIN(time) FROM WorldRecords r2 WHERE r1.build_name = r2.build_name)
-            GROUP BY player_name COLLATE NOCASE
+            WHERE time = (SELECT MIN(time) FROM WorldRecords r2 WHERE LOWER(r1.build_name) = LOWER(r2.build_name))
+            GROUP BY LOWER(player_name), player_name
             ORDER BY wr_count DESC
-            LIMIT ?
+            LIMIT $1
         """
-        async with db.execute(query, (limit,)) as cursor:
-            # fetchall() restituisce tutti i risultati in un colpo solo
-            return await cursor.fetchall()
+        rows = await conn.fetch(query, limit)
+        # Convertiamo i risultati nel formato originale per non rompere il resto del codice
+        return [(r['player_name'], r['wr_count']) for r in rows]
+    finally:
+        await conn.close()
 
 async def generate_build_message(build_name: str) -> str:
     """
-    Genera il testo formattato per il canale dei record (1°, 2° e 3° posto) 
-    leggendo dal database SQLite, mantenendo i decimali ed effettuando
-    l'escaping del Markdown di Discord per nomi speciali (es. _Ilusion_).
+    Genera il testo formattato per il canale dei record leggendo da Supabase.
     """
-    
-    async with aiosqlite.connect("speedbuilders.db") as db:
+    conn = await asyncpg.connect(config.DATABASE_URL)
+    try:
         query = """
             SELECT player_name, MIN(time) as time 
             FROM WorldRecords 
-            WHERE build_name = ? COLLATE NOCASE 
-            GROUP BY player_name COLLATE NOCASE 
+            WHERE LOWER(build_name) = LOWER($1)
+            GROUP BY LOWER(player_name), player_name 
             ORDER BY time ASC
         """
-        async with db.execute(query, (build_name,)) as cursor:
-            rows = await cursor.fetchall()
-            
+        rows = await conn.fetch(query, build_name)
+    finally:
+        await conn.close()
+        
     tempi_raggruppati = {}
-    for player, time_val in rows:
-        # FASE DI SANIFICAZIONE: Inserisce un backslash prima di ogni underscore
-        # per forzare Discord a trattarlo come testo normale e non come corsivo.
+    for row in rows:
+        player = row['player_name']
+        time_val = row['time']
         safe_player = player.replace("_", "\\_")
         
         if time_val not in tempi_raggruppati:
@@ -130,7 +134,6 @@ async def generate_build_message(build_name: str) -> str:
     
     testo = f"Build: {build_name}\n"
     
-    # --- PRIMO POSTO ---
     if len(tempi_ordinati) > 0:
         t1 = tempi_ordinati[0]
         p1 = "/".join(tempi_raggruppati[t1])
@@ -138,7 +141,6 @@ async def generate_build_message(build_name: str) -> str:
     else:
         testo += "> :first_place: - \n"
         
-    # --- SECONDO POSTO ---
     if len(tempi_ordinati) > 1:
         t2 = tempi_ordinati[1]
         p2 = "/".join(tempi_raggruppati[t2])
@@ -146,7 +148,6 @@ async def generate_build_message(build_name: str) -> str:
     else:
         testo += "> :second_place: - \n"
         
-    # --- TERZO POSTO ---
     if len(tempi_ordinati) > 2:
         t3 = tempi_ordinati[2]
         p3 = "/".join(tempi_raggruppati[t3])
