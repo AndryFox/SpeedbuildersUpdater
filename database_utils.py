@@ -1,11 +1,27 @@
 import re
 import config
+import aiosqlite
 
 def get_main_name(name):
     n = name.lower().strip()
     return config.ALIASES.get(n, n)
 
 async def get_wr_count(bot, player_name):
+    """
+    Interroga il database per contare quanti primi posti (WR) possiede un giocatore.
+    Manteniamo 'bot' come parametro per non rompere il codice esistente in altri file,
+    anche se ora usiamo direttamente aiosqlite.
+    """
+    async with aiosqlite.connect("speedbuilders.db") as db:
+        query = """
+            SELECT COUNT(*) 
+            FROM WorldRecords r1
+            WHERE player_name = ? COLLATE NOCASE
+            AND time = (SELECT MIN(time) FROM WorldRecords r2 WHERE r1.build_name = r2.build_name)
+        """
+        async with db.execute(query, (player_name,)) as cursor:
+            result = await cursor.fetchone()
+            return result[0] if result else 0
     channel = bot.get_channel(config.RANKINGS_CHANNEL_ID)
     if not channel:
         return 0
@@ -68,49 +84,6 @@ async def get_wr_rounds_info(bot):
                 return old_rounds, holders_str
     return 0, "Sconosciuto"
 
-async def get_wr_from_database(bot, build_name, channel_id=None):
-    if channel_id is None:
-        channel_id = config.WR_CHANNEL_ID
-        
-    channel = bot.get_channel(channel_id)
-    
-    if not channel:
-        print("ERRORE: Il bot non riesce a vedere il canale database!")
-        return None, None, None
-        
-    build_clean = build_name.lower().strip()
-    
-    async for message in channel.history(limit=500):
-        if not message.content:
-            continue
-            
-        lines = message.content.split('\n')
-        for i, line in enumerate(lines):
-            clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").strip()
-            
-            if clean_line.startswith("build:") and build_clean in clean_line:
-                for j in range(i + 1, min(i + 4, len(lines))):
-                    top_line = lines[j]
-                    top_line = top_line.replace(">", "").replace("_", "").replace("*", "").replace("~", "").strip()
-                    top_line = top_line.replace("–", "-").replace("—", "-")
-                    
-                    if "-" in top_line:
-                        data_str = top_line.split("-", 1)[1].strip() 
-                        
-                        if data_str != "": 
-                            parts = data_str.rsplit(' ', 1)
-                            if len(parts) == 2:
-                                player = parts[0].strip()
-                                time_str = parts[1].lower().replace("s", "").replace("sec", "").strip()
-                                
-                                try:
-                                    time_val = float(time_str)
-                                    return player, time_val, message.jump_url
-                                except ValueError:
-                                    pass
-                        break
-    return None, None, None
-
 async def get_sim_wr_link(bot, build_name):
     channel = bot.get_channel(config.SIM_WR_CHANNEL_ID)
     if not channel:
@@ -130,3 +103,79 @@ async def get_sim_wr_link(bot, build_name):
                 return message.jump_url
                 
     return None
+
+async def get_top_players(limit=15):
+    """
+    Calcola la classifica generale leggendo direttamente chi detiene i primi posti.
+    Restituisce una lista di tuple: [('Giocatore1', 10), ('Giocatore2', 8), ...]
+    """
+    async with aiosqlite.connect("speedbuilders.db") as db:
+        query = """
+            SELECT player_name, COUNT(*) as wr_count 
+            FROM WorldRecords r1
+            WHERE time = (SELECT MIN(time) FROM WorldRecords r2 WHERE r1.build_name = r2.build_name)
+            GROUP BY player_name COLLATE NOCASE
+            ORDER BY wr_count DESC
+            LIMIT ?
+        """
+        async with db.execute(query, (limit,)) as cursor:
+            # fetchall() restituisce tutti i risultati in un colpo solo
+            return await cursor.fetchall()
+
+async def generate_build_message(build_name: str) -> str:
+    """
+    Genera il testo formattato per il canale dei record (1°, 2° e 3° posto) 
+    leggendo dal database SQLite, mantenendo i decimali ed effettuando
+    l'escaping del Markdown di Discord per nomi speciali (es. _Ilusion_).
+    """
+    import aiosqlite # Assicurati che l'import sia globale o nel file
+    
+    async with aiosqlite.connect("speedbuilders.db") as db:
+        query = """
+            SELECT player_name, time 
+            FROM WorldRecords 
+            WHERE build_name = ? COLLATE NOCASE 
+            ORDER BY time ASC
+        """
+        async with db.execute(query, (build_name,)) as cursor:
+            rows = await cursor.fetchall()
+            
+    tempi_raggruppati = {}
+    for player, time_val in rows:
+        # FASE DI SANIFICAZIONE: Inserisce un backslash prima di ogni underscore
+        # per forzare Discord a trattarlo come testo normale e non come corsivo.
+        safe_player = player.replace("_", "\\_")
+        
+        if time_val not in tempi_raggruppati:
+            tempi_raggruppati[time_val] = []
+        tempi_raggruppati[time_val].append(safe_player)
+        
+    tempi_ordinati = sorted(tempi_raggruppati.keys())
+    
+    testo = f"Build: {build_name}\n"
+    
+    # --- PRIMO POSTO ---
+    if len(tempi_ordinati) > 0:
+        t1 = tempi_ordinati[0]
+        p1 = "/".join(tempi_raggruppati[t1])
+        testo += f"> :first_place: - **__{p1} {t1}__**\n"
+    else:
+        testo += "> :first_place: - \n"
+        
+    # --- SECONDO POSTO ---
+    if len(tempi_ordinati) > 1:
+        t2 = tempi_ordinati[1]
+        p2 = "/".join(tempi_raggruppati[t2])
+        testo += f"> :second_place: - {p2} {t2}\n"
+    else:
+        testo += "> :second_place: - \n"
+        
+    # --- TERZO POSTO ---
+    if len(tempi_ordinati) > 2:
+        t3 = tempi_ordinati[2]
+        p3 = "/".join(tempi_raggruppati[t3])
+        testo += f"> :third_place: - {p3} {t3}"
+    else:
+        testo += "> :third_place: - "
+        
+    return testo
