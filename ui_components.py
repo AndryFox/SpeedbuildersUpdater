@@ -193,11 +193,6 @@ class EditWRView(View):
         if rejected_channel and self.attachment:
             file_to_send = await self.attachment.to_file()
             await rejected_channel.send(content=f"Screen rifiutato (dopo annullamento) da {author_mention}:", file=file_to_send)
-
-        # 3. ELIMINAZIONE DAL DATABASE SQLITE E RECUPERO ID
-        import aiosqlite
-        import aiohttp
-        import database_utils
         
         build_key = self.def_b.strip()
         
@@ -231,7 +226,6 @@ class EditWRView(View):
         await self.original_message.edit(content=new_content, view=self)
         await self.original_message.delete(delay=20)
         
-        import rankings
         await rankings.trigger_ranking_update(self.bot)
         
         await interaction.followup.send("✅ Record annullato, rimosso dal database e mappa ripristinata!", ephemeral=True)
