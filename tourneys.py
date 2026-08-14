@@ -23,7 +23,7 @@ def setup_tourney_commands(bot):
         )
         
         async with aiohttp.ClientSession() as session:
-            webhook = discord.Webhook.from_url(config.WEBHOOK_URL, session=session)
+            webhook = discord.Webhook.from_url(config.TOURNEY_WEBHOOK_URL, session=session)
             msg = await webhook.send(
                 embed=embed, 
                 username="Tourneys Updater",
