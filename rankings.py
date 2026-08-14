@@ -3,7 +3,7 @@ from discord import app_commands
 import re
 import config
 import aiohttp
-import aiosqlite
+import asyncpg
 import time
 from database_utils import get_main_name
 
@@ -43,51 +43,46 @@ def get_ordinal(n: int) -> str:
     return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 async def generate_wr_ranking_text(bot) -> str:
-    global PLAYERS_CACHE # Manteniamo la cache dei nomi per l'autocompletamento
+    global PLAYERS_CACHE 
     
     wr_counts = {}
     display_names = {}
     
-    # 1. Interroghiamo il database istantaneamente
-    async with aiosqlite.connect("speedbuilders.db") as db:
-        # Questa query estrae solo i record che corrispondono al tempo MIN per ogni mappa
+    # 1. Interroghiamo il database cloud Supabase
+    conn = await asyncpg.connect(config.DATABASE_URL)
+    try:
         query = """
             SELECT player_name
             FROM WorldRecords r1
-            WHERE time = (SELECT MIN(time) FROM WorldRecords r2 WHERE r1.build_name = r2.build_name)
+            WHERE time = (SELECT MIN(time) FROM WorldRecords r2 WHERE LOWER(r1.build_name) = LOWER(r2.build_name))
         """
-        async with db.execute(query) as cursor:
-            rows = await cursor.fetchall()
+        rows = await conn.fetch(query)
             
-            for row in rows:
-                nome_grezzo = row[0]
-                nome_pulito = nome_grezzo.replace("\\", "")
-                nome_norm = get_main_name(nome_pulito)
-                
-                # Calcola i punteggi (unificando gli alias)
-                wr_counts[nome_norm] = wr_counts.get(nome_norm, 0) + 1
-                
-                # Salva il nome estetico per la classifica
-                if nome_norm not in display_names:
-                    if nome_pulito.lower() != nome_norm.lower(): 
-                        display_names[nome_norm] = nome_norm
-                    else: 
-                        display_names[nome_norm] = nome_grezzo
+        for row in rows:
+            nome_grezzo = row['player_name']
+            nome_pulito = nome_grezzo.replace("\\", "")
+            nome_norm = get_main_name(nome_pulito)
+            
+            wr_counts[nome_norm] = wr_counts.get(nome_norm, 0) + 1
+            
+            if nome_norm not in display_names:
+                if nome_pulito.lower() != nome_norm.lower(): 
+                    display_names[nome_norm] = nome_norm
+                else: 
+                    display_names[nome_norm] = nome_grezzo
+    finally:
+        await conn.close()
 
-    # Aggiorna la cache per il comando /wrs
     PLAYERS_CACHE = sorted(list({v.replace("\\", "") for v in display_names.values()}))
     
-    # 2. Raggruppiamo i giocatori per punteggio (Stessa logica visiva di prima)
+    # 2. Raggruppiamo i giocatori per punteggio 
     sorted_wrs = sorted(wr_counts.items(), key=lambda x: x[1], reverse=True)
     score_groups = {}
     for player_norm, count in sorted_wrs:
         if count not in score_groups: 
             score_groups[count] = []
         nome_estetico = display_names.get(player_norm, player_norm)
-        
-        # --- LA RIGA MAGICA SALVA-CORSIVO ---
         nome_estetico = nome_estetico.replace("_", "\\_")
-        
         score_groups[count].append(nome_estetico)
         
     # 3. Generiamo il testo finale formattato
@@ -267,24 +262,25 @@ def setup_rankings_commands(bot):
         player_norm = get_main_name(player.replace("\\", ""))
         records = []
         
-        # Interroga il DB per trovare TUTTI i record e li filtra tramite il sistema di Alias!
-        async with aiosqlite.connect("speedbuilders.db") as db:
+        # Connessione a Supabase per il comando /wrs
+        conn = await asyncpg.connect(config.DATABASE_URL)
+        try:
             query = """
                 SELECT r1.build_name, r1.time, r1.player_name
                 FROM WorldRecords r1
-                WHERE r1.time = (SELECT MIN(time) FROM WorldRecords r2 WHERE r1.build_name = r2.build_name)
-                ORDER BY r1.build_name ASC
+                WHERE r1.time = (SELECT MIN(time) FROM WorldRecords r2 WHERE LOWER(r1.build_name) = LOWER(r2.build_name))
+                ORDER BY LOWER(r1.build_name) ASC
             """
-            async with db.execute(query) as cursor:
-                rows = await cursor.fetchall()
-                for row in rows:
-                    build_name = row[0]
-                    time_val = row[1]
-                    player_db = row[2]
-                    
-                    # Controlla se il nome registrato nel DB corrisponde all'alias del giocatore cercato
-                    if get_main_name(player_db) == player_norm:
-                        records.append(f"▸ Build: **{build_name}** ⸻ `{time_val}s`")
+            rows = await conn.fetch(query)
+            for row in rows:
+                build_name = row['build_name']
+                time_val = row['time']
+                player_db = row['player_name']
+                
+                if get_main_name(player_db) == player_norm:
+                    records.append(f"▸ Build: **{build_name}** ⸻ `{time_val}s`")
+        finally:
+            await conn.close()
                         
         count = len(records)
         
