@@ -1,5 +1,6 @@
 import discord
 from discord import app_commands
+import re
 import config
 import aiohttp
 import aiosqlite
@@ -148,8 +149,7 @@ async def add_or_update_round_record(bot, rounds: int, team: str, timestamp: str
         msg = await channel.fetch_message(config.RANKING_ROUNDS_MSG_ID)
         content = msg.content
     except: return
-        
-    import re
+    
     records = []
     current_rounds = 0
     
