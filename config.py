@@ -25,6 +25,8 @@ ALIASES = {
     "samu_onchill": "boxato" # Ricorda di mettere sempre la chiave in minuscolo!
 }
 
+DATABASE_URL = os.getenv('DATABASE_URL')
+
 # --- IMPOSTAZIONI WEBHOOK WORLD RECORDS ---
 WORLD_RECORDS_WEBHOOK_URL = os.getenv('WORLD_RECORDS_WEBHOOK_URL')
 
