@@ -4,7 +4,7 @@ import config
 import rankings
 from database_utils import get_main_name, get_wr_count, get_sim_wr_link
 import time
-import aiosqlite
+import asyncpg
 import aiohttp
 import database_utils
 
@@ -194,21 +194,24 @@ class EditWRView(View):
             file_to_send = await self.attachment.to_file()
             await rejected_channel.send(content=f"Screen rifiutato (dopo annullamento) da {author_mention}:", file=file_to_send)
         
+        # 3. ELIMINAZIONE DAL DATABASE CLOUD E RECUPERO ID
         build_key = self.def_b.strip()
         
-        async with aiosqlite.connect("speedbuilders.db") as db:
+        conn = await asyncpg.connect(config.DATABASE_URL)
+        try:
             # Cancella esattamente QUEL record errato appena inserito
-            await db.execute(
-                "DELETE FROM WorldRecords WHERE build_name = ? COLLATE NOCASE AND player_name = ? AND time = ?",
-                (build_key, self.def_p, float(self.def_t))
+            await conn.execute(
+                "DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3",
+                build_key, self.def_p, float(self.def_t)
             )
-            await db.commit()
             
             # Cerca l'ID del messaggio della build per poterlo ripristinare
             msg_id = None
-            async with db.execute("SELECT message_id FROM BuildMessages WHERE build_name = ? COLLATE NOCASE", (build_key,)) as cursor:
-                row = await cursor.fetchone()
-                if row: msg_id = row[0]
+            row = await conn.fetchrow("SELECT message_id FROM BuildMessages WHERE LOWER(build_name) = LOWER($1)", build_key)
+            if row: 
+                msg_id = row['message_id']
+        finally:
+            await conn.close()
 
         # 4. RIPRISTINA IL VECCHIO MESSAGGIO DEL WEBHOOK
         if msg_id:
@@ -280,37 +283,36 @@ class WRModal(Modal):
         except ValueError: new_time = 0.0
 
         # 2. LOGICA DATABASE 
-        async with aiosqlite.connect("speedbuilders.db") as db:
-            
+        conn = await asyncpg.connect(config.DATABASE_URL)
+        try:
             # --- SE È UN EDIT, ELIMINA IL VECCHIO RECORD ERRATO ---
             if self.is_edit:
                 try: old_t = float(self.original_view.def_t)
                 except ValueError: old_t = 0.0
-                await db.execute(
-                    "DELETE FROM WorldRecords WHERE build_name = ? COLLATE NOCASE AND player_name = ? AND time = ?",
-                    (self.original_view.def_b.strip(), self.original_view.def_p.strip(), old_t)
+                await conn.execute(
+                    "DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3",
+                    self.original_view.def_b.strip(), self.original_view.def_p.strip(), old_t
                 )
-                await db.commit()
 
             # Controlla se la mappa esiste già per usare le maiuscole corrette
-            async with db.execute("SELECT build_name FROM WorldRecords WHERE build_name = ? COLLATE NOCASE LIMIT 1", (build_key,)) as cursor:
-                row = await cursor.fetchone()
-                if row: build_key = row[0]
+            row = await conn.fetchrow("SELECT build_name FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) LIMIT 1", build_key)
+            if row: 
+                build_key = row['build_name']
                     
             # Trova i vecchi record per questa mappa prima di inserire il nuovo
             query_old = """
                 SELECT time, player_name 
                 FROM WorldRecords r1 
-                WHERE build_name = ? COLLATE NOCASE 
-                AND time = (SELECT MIN(time) FROM WorldRecords r2 WHERE r1.build_name = r2.build_name)
+                WHERE LOWER(build_name) = LOWER($1) 
+                AND time = (SELECT MIN(time) FROM WorldRecords r2 WHERE LOWER(r1.build_name) = LOWER(r2.build_name))
             """
             old_time = None
             old_players = []
-            async with db.execute(query_old, (build_key,)) as cursor:
-                rows = await cursor.fetchall()
-                if rows:
-                    old_time = rows[0][0]
-                    old_players = [r[1] for r in rows]
+            
+            rows = await conn.fetch(query_old, build_key)
+            if rows:
+                old_time = rows[0]['time']
+                old_players = [r['player_name'] for r in rows]
 
             # Calcola i WR totali di tutti i coinvolti PRIMA dell'inserimento
             players_to_check = set([get_main_name(p) for p in old_players] + [current_norm])
@@ -319,70 +321,66 @@ class WRModal(Modal):
                 old_counts[p] = await get_wr_count(self.bot, p)
 
             # INSERISCE IL NUOVO RECORD NEL DATABASE
-            await db.execute("INSERT INTO WorldRecords (build_name, player_name, time) VALUES (?, ?, ?)", (build_key, current_player, new_time))
-            await db.commit()
+            await conn.execute("INSERT INTO WorldRecords (build_name, player_name, time) VALUES ($1, $2, $3)", build_key, current_player, new_time)
             
             # Calcola i WR totali DOPO l'inserimento
             new_counts = {}
             for p in players_to_check:
                 new_counts[p] = await get_wr_count(self.bot, p)
 
-        # 3. Genera il messaggio delle statistiche
-        extra_message = ""
-        stats_msg = "\n"
-        
-        if old_time is not None:
-            if new_time < old_time:
-                diff = round(old_time - new_time, 3)
-                old_players_norm = [get_main_name(p) for p in old_players]
-                if current_norm in old_players_norm:
-                    if len(old_players) > 1:
-                        altri = [p for p in old_players if get_main_name(p) != current_norm]
-                        extra_message = f"\n{current_player} improved their own wr and beat {'/'.join(altri)} by {diff}s"
-                    else: extra_message = f"\n{current_player} improved their own wr by {diff}s"
-                else: extra_message = f"\n{current_player} beat {'/'.join(old_players)}'s old wr by {diff}s"
-            elif new_time == old_time:
-                old_players_norm = [get_main_name(p) for p in old_players]
-                if current_norm in old_players_norm: extra_message = f"\n{current_player} tied their own wr"
-                else: extra_message = f"\n{current_player} tied {'/'.join(old_players)}'s wr"
+            # 3. Genera il messaggio delle statistiche
+            extra_message = ""
+            stats_msg = "\n"
+            
+            if old_time is not None:
+                if new_time < old_time:
+                    diff = round(old_time - new_time, 3)
+                    old_players_norm = [get_main_name(p) for p in old_players]
+                    if current_norm in old_players_norm:
+                        if len(old_players) > 1:
+                            altri = [p for p in old_players if get_main_name(p) != current_norm]
+                            extra_message = f"\n{current_player} improved their own wr and beat {'/'.join(altri)} by {diff}s"
+                        else: extra_message = f"\n{current_player} improved their own wr by {diff}s"
+                    else: extra_message = f"\n{current_player} beat {'/'.join(old_players)}'s old wr by {diff}s"
+                elif new_time == old_time:
+                    old_players_norm = [get_main_name(p) for p in old_players]
+                    if current_norm in old_players_norm: extra_message = f"\n{current_player} tied their own wr"
+                    else: extra_message = f"\n{current_player} tied {'/'.join(old_players)}'s wr"
+                        
+            for p_norm in players_to_check:
+                disp_name = current_player if p_norm == current_norm else next((p for p in old_players if get_main_name(p) == p_norm), p_norm)
+                c_old, c_new = old_counts[p_norm], new_counts[p_norm]
+                if c_new > c_old: stats_msg += f"{disp_name} gained 1 wr ({c_old} -> {c_new})\n"
+                elif c_new < c_old: stats_msg += f"{disp_name} lost 1 wr ({c_old} -> {c_new})\n"
+                elif p_norm == current_norm: stats_msg += f"{disp_name} kept their wr count ({c_new})\n"
+
+            testo_record = f'```\n{build_key} : {new_time} - {current_player}{extra_message}\n\n{stats_msg.strip()}\n```'
+            
+            # 4. EDIT AUTOMATICO DEL MESSAGGIO WEBHOOK
+            jump_url = None
+            msg_row = await conn.fetchrow("SELECT message_id FROM BuildMessages WHERE LOWER(build_name) = LOWER($1)", build_key)
+            msg_id = msg_row['message_id'] if msg_row else None
+
+            if msg_id:
+                testo_formattato = await database_utils.generate_build_message(build_key)
+                async with aiohttp.ClientSession() as session:
+                    webhook = discord.Webhook.from_url(config.WORLD_RECORDS_WEBHOOK_URL, session=session)
+                    try:
+                        await webhook.edit_message(msg_id, content=testo_formattato)
+                        jump_url = f"https://discord.com/channels/{interaction.guild_id}/{config.WR_CHANNEL_ID}/{msg_id}"
+                    except Exception as e:
+                        print(f"Errore webhook edit: {e}")
+            else:
+                # SE LA MAPPA È NUOVA (Crea il messaggio e salva il nuovo ID)
+                testo_formattato = await database_utils.generate_build_message(build_key)
+                async with aiohttp.ClientSession() as session:
+                    webhook = discord.Webhook.from_url(config.WORLD_RECORDS_WEBHOOK_URL, session=session)
+                    new_msg = await webhook.send(content=testo_formattato, wait=True)
+                    jump_url = f"https://discord.com/channels/{interaction.guild_id}/{config.WR_CHANNEL_ID}/{new_msg.id}"
                     
-        for p_norm in players_to_check:
-            disp_name = current_player if p_norm == current_norm else next((p for p in old_players if get_main_name(p) == p_norm), p_norm)
-            c_old, c_new = old_counts[p_norm], new_counts[p_norm]
-            if c_new > c_old: stats_msg += f"{disp_name} gained 1 wr ({c_old} -> {c_new})\n"
-            elif c_new < c_old: stats_msg += f"{disp_name} lost 1 wr ({c_old} -> {c_new})\n"
-            elif p_norm == current_norm: stats_msg += f"{disp_name} kept their wr count ({c_new})\n"
-
-        testo_record = f'```\n{build_key} : {new_time} - {current_player}{extra_message}\n\n{stats_msg.strip()}\n```'
-        
-        # 4. EDIT AUTOMATICO DEL MESSAGGIO WEBHOOK
-        jump_url = None
-        async with aiosqlite.connect("speedbuilders.db") as db:
-            async with db.execute("SELECT message_id FROM BuildMessages WHERE build_name = ? COLLATE NOCASE", (build_key,)) as cursor:
-                row = await cursor.fetchone()
-                msg_id = row[0] if row else None
-
-        if msg_id:
-            testo_formattato = await database_utils.generate_build_message(build_key)
-            async with aiohttp.ClientSession() as session:
-                webhook = discord.Webhook.from_url(config.WORLD_RECORDS_WEBHOOK_URL, session=session)
-                try:
-                    await webhook.edit_message(msg_id, content=testo_formattato)
-                    jump_url = f"https://discord.com/channels/{interaction.guild_id}/{config.WR_CHANNEL_ID}/{msg_id}"
-                except Exception as e:
-                    print(f"Errore webhook edit: {e}")
-        else:
-            # SE LA MAPPA È NUOVA (Crea il messaggio e salva il nuovo ID)
-            testo_formattato = await database_utils.generate_build_message(build_key)
-            async with aiohttp.ClientSession() as session:
-                webhook = discord.Webhook.from_url(config.WORLD_RECORDS_WEBHOOK_URL, session=session)
-                avatar_url = self.bot.user.avatar.url if self.bot.user.avatar else None
-                new_msg = await webhook.send(content=testo_formattato, username="FearGames Records", avatar_url=avatar_url, wait=True)
-                jump_url = f"https://discord.com/channels/{interaction.guild_id}/{config.WR_CHANNEL_ID}/{new_msg.id}"
-                
-                async with aiosqlite.connect("speedbuilders.db") as db:
-                    await db.execute("INSERT INTO BuildMessages (build_name, message_id) VALUES (?, ?)", (build_key, new_msg.id))
-                    await db.commit()
+                    await conn.execute("INSERT INTO BuildMessages (build_name, message_id) VALUES ($1, $2)", build_key, new_msg.id)
+        finally:
+            await conn.close()
 
         # 5. AGGIORNAMENTO UI DISCORD
         if self.is_edit:
