@@ -10,6 +10,9 @@ import asyncio
 import aiohttp
 import aiosqlite
 import database_utils
+import shutil
+from datetime import datetime
+from discord.ext import tasks
 
 # Importiamo i nostri moduli
 import config
@@ -41,6 +44,29 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+@tasks.loop(hours=24)
+async def backup_database():
+    try:
+        # Ora il bot va a pescare l'ID direttamente dal tuo config!
+        canale_backup = bot.get_channel(config.CANALE_BACKUP_ID)
+        
+        if canale_backup:
+            now = datetime.now().strftime("%Y-%m-%d_%H-%M")
+            nome_file = f"speedbuilders_backup_{now}.db"
+            
+            # Crea un oggetto File di Discord prendendo il tuo database attuale
+            file_db = discord.File("speedbuilders.db", filename=nome_file)
+            
+            # Invia il file nel canale privato
+            await canale_backup.send(content=f"📦 **Backup automatico del {now}**", file=file_db)
+            print("✅ Backup inviato su Discord con successo!")
+        else:
+            print("❌ Errore: Canale di backup non trovato. Controlla l'ID nel config!")
+            
+    except Exception as e:
+        print(f"❌ Errore durante il backup automatico: {e}")
+
+'''
 @bot.tree.command(name="setup_all_builds", description="Invia i messaggi delle build e salva gli ID nel DB")
 @app_commands.default_permissions(administrator=True)
 async def setup_all_builds(interaction: discord.Interaction):
@@ -104,89 +130,15 @@ async def setup_all_builds(interaction: discord.Interaction):
         await interaction.user.send(f"✅ Finito! Ho inviato tutti i messaggi e ho salvato i loro ID in cassaforte.")
     except discord.Forbidden:
         pass
-
-# --- COMANDO TEMPORANEO DI MIGRAZIONE ---
-@bot.tree.command(name="migrate_db", description="[TEMPORANEO] Migra i record da Discord a SQLite")
-@app_commands.default_permissions(administrator=True)
-async def migrate_db(interaction: discord.Interaction):
-    if interaction.user.id != config.MIO_ID:
-        return await interaction.response.send_message("❌ Accesso negato.", ephemeral=True)
-        
-    await interaction.response.defer(ephemeral=True)
-    
-    channel = interaction.guild.get_channel(config.WR_CHANNEL_ID)
-    if not channel:
-        return await interaction.followup.send("⚠️ Canale WR non trovato!")
-        
-    conn = sqlite3.connect("speedbuilders.db")
-    cursor = conn.cursor()
-    
-    cursor.execute("DELETE FROM WorldRecords")
-    
-    record_inseriti = 0
-    build_processate = 0
-    
-    async for message in channel.history(limit=None, oldest_first=True):
-        # Controlla in modo molto blando se è un messaggio di record
-        if not any(x in message.content.lower() for x in ["first_place", "second_place", "third_place", "🥇", "🥈", "🥉"]):
-            continue 
-            
-        lines = message.content.split('\n')
-        current_build_name = "Sconosciuta"
-        
-        for line in lines:
-            clean_line = line.strip().lower()
-            if clean_line.startswith("build:") or clean_line.startswith("build :"):
-                current_build_name = line.split(":", 1)[1].strip()
-                build_processate += 1
-                continue 
-                
-            # LA VERA MODIFICA: Ora cattura 1°, 2° e 3° posto!
-            if any(podium in line.lower() for podium in ["first_place", "second_place", "third_place", "🥇", "🥈", "🥉"]):
-                if "-" not in line:
-                    continue
-                    
-                content = line.split("-", 1)[1].strip()
-                content = content.replace("*", "").replace("~", "")
-                
-                if content.startswith("__"):
-                    content = content[2:]
-                if content.endswith("__"):
-                    content = content[:-2]
-                    
-                content = content.strip()
-                
-                last_space_index = content.rfind(" ")
-                if last_space_index == -1:
-                    continue
-                    
-                names_str = content[:last_space_index].strip()
-                time_str = content[last_space_index:].strip().lower().replace("s", "").replace("sec", "")
-                
-                try:
-                    time_val = float(time_str)
-                except ValueError:
-                    continue 
-                    
-                names_str = names_str.replace("\\", "")
-                players = [p.strip() for p in names_str.split("/")]
-                
-                for player in players:
-                    cursor.execute(
-                        "INSERT INTO WorldRecords (build_name, player_name, time) VALUES (?, ?, ?)",
-                        (current_build_name, player, time_val)
-                    )
-                    record_inseriti += 1
-                    
-    conn.commit()
-    conn.close()
-    
-    await interaction.followup.send(f"✅ Migrazione completata con successo!\nScansionate **{build_processate}** build.\nInseriti **{record_inseriti}** record nel database.")
-# ----------------------------------------
+'''
 
 @bot.event
 async def on_ready():
     print(f"✅ Bot {bot.user} avviato con successo e file modulari collegati!")
+
+    # --- AVVIA IL CICLO DI BACKUP ---
+    if not backup_database.is_running():
+        backup_database.start()
 
     # --- REGISTRA I BOTTONI IMMORTALI QUI ---
     bot.add_view(ReviewView())
