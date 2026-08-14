@@ -150,10 +150,10 @@ async def on_ready():
     IL_MIO_SERVER = discord.Object(id=935816490039533621) 
     
     bot.tree.clear_commands(guild=IL_MIO_SERVER) 
-    bot.tree.copy_global_to(guild=IL_MIO_SERVER) 
+    # Sincronizziamo l'albero "vuoto" per cancellarli fisicamente dal server!
     await bot.tree.sync(guild=IL_MIO_SERVER)     
     
-    # 2. Manteniamo solo la sincronizzazione globale pulita
+    # 2. Sincronizziamo SOLO la copia globale
     await bot.tree.sync()
 
 @bot.event
