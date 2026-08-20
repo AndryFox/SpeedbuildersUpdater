@@ -49,6 +49,36 @@ async def setup_all_builds(interaction: discord.Interaction):
     pass
 '''
 
+@bot.tree.command(name="manual_submit", description="Invia un record in revisione per conto di un altro utente (Solo Admin)")
+@app_commands.describe(player="L'utente che ha fatto il record", image="Lo screenshot del record")
+@app_commands.default_permissions(administrator=True)
+async def manual_submit(interaction: discord.Interaction, player: discord.Member, image: discord.Attachment):
+    # Buttafuori: Solo tu puoi usare questo comando
+    if interaction.user.id != config.MIO_ID:
+        return await interaction.response.send_message("❌ Accesso negato.", ephemeral=True)
+
+    # defer(ephemeral=True) fa sì che il comando carichi in modo "invisibile" per gli altri
+    await interaction.response.defer(ephemeral=True)
+
+    review_channel = bot.get_channel(config.REVIEW_CHANNEL_ID)
+    
+    if not review_channel:
+        return await interaction.followup.send("❌ Errore: Canale di revisione non trovato.", ephemeral=True)
+
+    # Prepara il file e i bottoni
+    view = ReviewView()
+    file_review = await image.to_file()
+
+    # Invia il messaggio fasullo nel canale di revisione
+    await review_channel.send(
+        content=f"New world record sent from {player.mention}",
+        file=file_review,
+        view=view
+    )
+
+    # Ti conferma che è andato tutto a buon fine senza che nessuno lo legga
+    await interaction.followup.send(f"🥷 ✅ Operazione fantasma completata! Screenshot inviato in revisione per conto di {player.mention}.", ephemeral=True)
+
 @bot.event
 async def on_ready():
     print(f"✅ Bot {bot.user} avviato con successo e collegato al Cloud!")
