@@ -183,37 +183,27 @@ class EditWRView(View):
     async def undo_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
         
-        # 1. Elimina il log testuale dal canale
         try: await self.update_message.delete()
         except: pass
         
-        # 2. Sposta lo screen nei rifiutati
         rejected_channel = self.bot.get_channel(config.REJECT_CHANNEL_ID)
         author_mention = self.original_message.mentions[0].mention if self.original_message.mentions else "l'utente"
         if rejected_channel and self.attachment:
             file_to_send = await self.attachment.to_file()
             await rejected_channel.send(content=f"Screen rifiutato (dopo annullamento) da {author_mention}:", file=file_to_send)
         
-        # 3. ELIMINAZIONE DAL DATABASE CLOUD E RECUPERO ID
         build_key = self.def_b.strip()
+        msg_id = None
         
-        conn = await asyncpg.connect(config.DATABASE_URL)
-        try:
-            # Cancella esattamente QUEL record errato appena inserito
+        async with database_utils.pool.acquire() as conn:
             await conn.execute(
                 "DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3",
                 build_key, self.def_p, float(self.def_t)
             )
-            
-            # Cerca l'ID del messaggio della build per poterlo ripristinare
-            msg_id = None
             row = await conn.fetchrow("SELECT message_id FROM BuildMessages WHERE LOWER(build_name) = LOWER($1)", build_key)
             if row: 
                 msg_id = row['message_id']
-        finally:
-            await conn.close()
 
-        # 4. RIPRISTINA IL VECCHIO MESSAGGIO DEL WEBHOOK
         if msg_id:
             testo_formattato = await database_utils.generate_build_message(build_key)
             async with aiohttp.ClientSession() as session:
@@ -223,14 +213,12 @@ class EditWRView(View):
                 except Exception as e:
                     print(f"Errore ripristino webhook: {e}")
 
-        # 5. Chiude la pratica sul messaggio originale e aggiorna la classifica
         for child in self.children: child.disabled = True
         new_content = self.original_message.content.replace("**Accepted ✅**", "**Rejected ❌ (Annullato)**")
         await self.original_message.edit(content=new_content, view=self)
         await self.original_message.delete(delay=20)
         
         await rankings.trigger_ranking_update(self.bot)
-        
         await interaction.followup.send("✅ Record annullato, rimosso dal database e mappa ripristinata!", ephemeral=True)
 
 # --- MODAL PER SIM WR ---
@@ -275,17 +263,13 @@ class WRModal(Modal):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         
-        # 1. Prepara i dati in ingresso
         build_key = self.build_name.value.strip()
         current_player = self.player_name.value.strip()
         current_norm = get_main_name(current_player)
         try: new_time = float(self.time_val.value.replace(',', '.'))
         except ValueError: new_time = 0.0
 
-        # 2. LOGICA DATABASE 
-        conn = await asyncpg.connect(config.DATABASE_URL)
-        try:
-            # --- SE È UN EDIT, ELIMINA IL VECCHIO RECORD ERRATO ---
+        async with database_utils.pool.acquire() as conn:
             if self.is_edit:
                 try: old_t = float(self.original_view.def_t)
                 except ValueError: old_t = 0.0
@@ -294,12 +278,10 @@ class WRModal(Modal):
                     self.original_view.def_b.strip(), self.original_view.def_p.strip(), old_t
                 )
 
-            # Controlla se la mappa esiste già per usare le maiuscole corrette
             row = await conn.fetchrow("SELECT build_name FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) LIMIT 1", build_key)
             if row: 
                 build_key = row['build_name']
                     
-            # Trova i vecchi record per questa mappa prima di inserire il nuovo
             query_old = """
                 SELECT time, player_name 
                 FROM WorldRecords r1 
@@ -314,21 +296,17 @@ class WRModal(Modal):
                 old_time = rows[0]['time']
                 old_players = [r['player_name'] for r in rows]
 
-            # Calcola i WR totali di tutti i coinvolti PRIMA dell'inserimento
             players_to_check = set([get_main_name(p) for p in old_players] + [current_norm])
             old_counts = {}
             for p in players_to_check:
                 old_counts[p] = await get_wr_count(self.bot, p)
 
-            # INSERISCE IL NUOVO RECORD NEL DATABASE
             await conn.execute("INSERT INTO WorldRecords (build_name, player_name, time) VALUES ($1, $2, $3)", build_key, current_player, new_time)
             
-            # Calcola i WR totali DOPO l'inserimento
             new_counts = {}
             for p in players_to_check:
                 new_counts[p] = await get_wr_count(self.bot, p)
 
-            # 3. Genera il messaggio delle statistiche
             extra_message = ""
             stats_msg = "\n"
             
@@ -356,7 +334,6 @@ class WRModal(Modal):
 
             testo_record = f'```\n{build_key} : {new_time} - {current_player}{extra_message}\n\n{stats_msg.strip()}\n```'
             
-            # 4. EDIT AUTOMATICO DEL MESSAGGIO WEBHOOK
             jump_url = None
             msg_row = await conn.fetchrow("SELECT message_id FROM BuildMessages WHERE LOWER(build_name) = LOWER($1)", build_key)
             msg_id = msg_row['message_id'] if msg_row else None
@@ -371,18 +348,13 @@ class WRModal(Modal):
                     except Exception as e:
                         print(f"Errore webhook edit: {e}")
             else:
-                # SE LA MAPPA È NUOVA (Crea il messaggio e salva il nuovo ID)
                 testo_formattato = await database_utils.generate_build_message(build_key)
                 async with aiohttp.ClientSession() as session:
                     webhook = discord.Webhook.from_url(config.WORLD_RECORDS_WEBHOOK_URL, session=session)
                     new_msg = await webhook.send(content=testo_formattato, wait=True)
                     jump_url = f"https://discord.com/channels/{interaction.guild_id}/{config.WR_CHANNEL_ID}/{new_msg.id}"
-                    
                     await conn.execute("INSERT INTO BuildMessages (build_name, message_id) VALUES ($1, $2)", build_key, new_msg.id)
-        finally:
-            await conn.close()
 
-        # 5. AGGIORNAMENTO UI DISCORD
         if self.is_edit:
             await self.update_message.edit(content=testo_record)
             self.original_view.def_b = build_key
@@ -401,7 +373,6 @@ class WRModal(Modal):
             
             await interaction.followup.send(f"✅ Record approvato e canale aggiornato automaticamente!\n🔗 **Vai al record:** {jump_url or 'N/A'}", ephemeral=True)
 
-        # 6. Aggiorna la classifica generale
         await rankings.trigger_ranking_update(self.bot)
 
 # --- BOTTONI SOTTO LO SCREEN (RESI IMMORTALI) ---
