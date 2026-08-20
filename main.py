@@ -7,11 +7,11 @@ from threading import Thread
 import re
 import asyncio
 import aiohttp
-import database_utils
 import shutil
 from datetime import datetime
 
 # Importiamo i nostri moduli
+import database_utils
 import config
 import rankings
 from ui_components import ReviewView
@@ -78,6 +78,12 @@ async def manual_submit(interaction: discord.Interaction, player: discord.Member
 
     # Ti conferma che è andato tutto a buon fine senza che nessuno lo legga
     await interaction.followup.send(f"🥷 ✅ Operazione fantasma completata! Screenshot inviato in revisione per conto di {player.mention}.", ephemeral=True)
+
+async def setup_hook():
+    await database_utils.init_pool()
+    print("🗄️ Database Pool inizializzato e linee pronte!")
+
+bot.setup_hook = setup_hook
 
 @bot.event
 async def on_ready():
