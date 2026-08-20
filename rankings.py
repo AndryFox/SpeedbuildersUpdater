@@ -5,6 +5,7 @@ import config
 import aiohttp
 import asyncpg
 import time
+import database_utils
 from database_utils import get_main_name
 
 # --- GLOBAL CACHE ---
@@ -48,9 +49,7 @@ async def generate_wr_ranking_text(bot) -> str:
     wr_counts = {}
     display_names = {}
     
-    # 1. Interroghiamo il database cloud Supabase
-    conn = await asyncpg.connect(config.DATABASE_URL)
-    try:
+    async with database_utils.pool.acquire() as conn:
         query = """
             SELECT player_name
             FROM WorldRecords r1
@@ -70,8 +69,6 @@ async def generate_wr_ranking_text(bot) -> str:
                     display_names[nome_norm] = nome_norm
                 else: 
                     display_names[nome_norm] = nome_grezzo
-    finally:
-        await conn.close()
 
     PLAYERS_CACHE = sorted(list({v.replace("\\", "") for v in display_names.values()}))
     
@@ -262,9 +259,7 @@ def setup_rankings_commands(bot):
         player_norm = get_main_name(player.replace("\\", ""))
         records = []
         
-        # Connessione a Supabase per il comando /wrs
-        conn = await asyncpg.connect(config.DATABASE_URL)
-        try:
+        async with database_utils.pool.acquire() as conn:
             query = """
                 SELECT r1.build_name, r1.time, r1.player_name
                 FROM WorldRecords r1
@@ -279,8 +274,6 @@ def setup_rankings_commands(bot):
                 
                 if get_main_name(player_db) == player_norm:
                     records.append(f"▸ Build: **{build_name}** ⸻ `{time_val}s`")
-        finally:
-            await conn.close()
                         
         count = len(records)
         
