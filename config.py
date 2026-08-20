@@ -22,7 +22,11 @@ MIO_ID = 715247279141027890
 # --- SISTEMA DEGLI ALIAS ---
 ALIASES = {
     "namsarr1": "namsar",
-    "samu_onchill": "boxato" # Ricorda di mettere sempre la chiave in minuscolo!
+    "samu_onchill": "boxato",
+    "blaagoosb": "M2xD",
+    "m2xd": "M2xD",
+    "kramperyt": "Myyv",
+    "myyv": "Myyv" # Ricorda di mettere sempre la chiave in minuscolo!
 }
 
 DATABASE_URL = os.getenv('DATABASE_URL')
