@@ -83,23 +83,34 @@ async def get_top_players(limit=15):
 
 async def generate_build_message(build_name: str) -> str:
     async with pool.acquire() as conn:
+        # Peschiamo TUTTI i tempi senza raggrupparli via SQL
         query = """
-            SELECT player_name, MIN(time) as time 
+            SELECT player_name, time 
             FROM WorldRecords 
             WHERE LOWER(build_name) = LOWER($1)
-            GROUP BY LOWER(player_name), player_name 
-            ORDER BY time ASC
         """
         rows = await conn.fetch(query, build_name)
         
-    tempi_raggruppati = {}
+    # 1. Trova il tempo migliore per ogni giocatore (unificando gli alias)
+    best_times = {}
     for row in rows:
-        player = row['player_name']
-        time_val = row['time']
-        safe_player = player.replace("_", "\\_")
-        if time_val not in tempi_raggruppati: tempi_raggruppati[time_val] = []
-        tempi_raggruppati[time_val].append(safe_player)
+        p_name = row['player_name']
+        t_val = row['time']
+        norm_name = get_main_name(p_name)
         
+        # Se non ha un tempo registrato o se questo tempo è migliore, aggiornalo
+        if norm_name not in best_times or t_val < best_times[norm_name]:
+            best_times[norm_name] = t_val
+            
+    # 2. Raggruppiamo i giocatori per tempo per gestire i pareggi
+    tempi_raggruppati = {}
+    for norm_name, t_val in best_times.items():
+        safe_player = norm_name.replace("_", "\\_")
+        if t_val not in tempi_raggruppati: 
+            tempi_raggruppati[t_val] = []
+        tempi_raggruppati[t_val].append(safe_player)
+        
+    # 3. Creiamo il testo ordinando dal tempo più basso
     tempi_ordinati = sorted(tempi_raggruppati.keys())
     testo = f"Build: {build_name}\n"
     
