@@ -21,7 +21,8 @@ MIO_ID = 715247279141027890
 
 # --- SISTEMA DEGLI ALIAS ---
 ALIASES = {
-    "namsarr1": "namsar",
+    "namsarr1": "rasman",
+    "namsar": "rasman,
     "samu_onchill": "boxato",
     "blaagoosb": "M2xD",
     "m2xd": "M2xD",
