@@ -10,9 +10,22 @@ async def init_pool():
     # Mantiene sempre aperte tra 2 e 10 connessioni al database
     pool = await asyncpg.create_pool(config.DATABASE_URL, statement_cache_size=0, min_size=2, max_size=10)
 
-def get_main_name(name):
-    n = name.lower().strip()
-    return config.ALIASES.get(n, n)
+# Questa è la nuova memoria RAM per gli alias
+ALIASES_CACHE = {}
+
+async def load_aliases():
+    """Carica tutti gli alias dal database alla RAM quando il bot si accende."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT old_name, new_name FROM Aliases")
+        ALIASES_CACHE.clear()
+        for row in rows:
+            ALIASES_CACHE[row['old_name']] = row['new_name']
+    print(f"🔄 Caricati {len(ALIASES_CACHE)} alias dal database.")
+
+def get_main_name(player_name: str) -> str:
+    """Controlla se il giocatore ha un alias nella cache."""
+    lower_name = player_name.lower()
+    return ALIASES_CACHE.get(lower_name, player_name)
 
 async def get_wr_count(bot, player_name):
     target_name = get_main_name(player_name)
