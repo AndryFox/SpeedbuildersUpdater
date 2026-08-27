@@ -81,7 +81,8 @@ async def manual_submit(interaction: discord.Interaction, player: discord.Member
 
 async def setup_hook():
     await database_utils.init_pool()
-    bot.add_view(ui_components.EditWRView(bot)) # <-- Questa è la magia!
+    await database_utils.load_aliases() # AGGIUNGI QUESTA RIGA
+    bot.add_view(ui_components.EditWRView(bot))
     print("🗄️ Database e Viste Persistenti inizializzati!")
 
 bot.setup_hook = setup_hook
