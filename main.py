@@ -100,21 +100,20 @@ async def add_alias(interaction: discord.Interaction, vecchio_nome: str, nuovo_n
                 n_name_lower, nuovo_nome
             )
 
-    # Aggiorniamo la RAM e ricalcoliamo le classifiche (codice esistente)
-       await database_utils.load_aliases()
-       import rankings
-       await rankings.trigger_ranking_update(bot)
+    # Aggiorniamo la RAM in tempo reale e ricalcoliamo le classifiche
+    await database_utils.load_aliases()
+    import rankings
+    await rankings.trigger_ranking_update(bot)
        
-       # INSERISCI QUESTO: Scriviamo nel log l'azione
-       await database_utils.log_audit(
-           admin_name=interaction.user.name,
-           action_type="ADD_ALIAS",
-           target=f"Vecchio: {vecchio_nome} -> Nuovo: {nuovo_nome}",
-           details="Identità unite manualmente."
-       )
+    # Scriviamo nel log l'azione
+    await database_utils.log_audit(
+        admin_name=interaction.user.name,
+        action_type="ADD_ALIAS",
+        target=f"Vecchio: {vecchio_nome} -> Nuovo: {nuovo_nome}",
+        details="Identità unite manualmente."
+    )
        
-       # (Codice esistente)
-       await interaction.response.send_message(...)
+    await interaction.response.send_message(f"✅ Identità unite! Tutti i record passati e futuri di `{vecchio_nome}` apparterranno a **{nuovo_nome}**.", ephemeral=True)
 
 async def setup_hook():
     await database_utils.init_pool()
@@ -123,6 +122,32 @@ async def setup_hook():
     print("🗄️ Database e Viste Persistenti inizializzati!")
 
 bot.setup_hook = setup_hook
+
+import traceback
+
+# 1. Cattura gli errori degli eventi e dei pulsanti
+@bot.event
+async def on_error(event_method, *args, **kwargs):
+    log_channel = bot.get_channel(config.LOG_CHANNEL_ID)
+    if log_channel:
+        error_msg = traceback.format_exc()
+        # Tagliamo il messaggio se è troppo lungo per Discord
+        if len(error_msg) > 1900:
+            error_msg = error_msg[-1900:]
+        await log_channel.send(f"⚠️ **Errore Critico (Evento: {event_method})**\n```py\n{error_msg}\n```")
+
+# 2. Cattura gli errori dei comandi Slash (come /add_alias)
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+    log_channel = bot.get_channel(config.LOG_CHANNEL_ID)
+    if log_channel:
+        await log_channel.send(f"⚠️ **Errore nel comando `/{interaction.command.name}` usato da {interaction.user.name}**\n```py\n{error}\n```")
+    
+    # Avvisiamo l'utente che qualcosa è andato storto senza mostrargli codici strani
+    if interaction.response.is_done():
+        await interaction.followup.send("❌ Ops! Si è verificato un errore interno. L'amministratore è stato avvisato.", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ Ops! Si è verificato un errore interno. L'amministratore è stato avvisato.", ephemeral=True)
 
 @bot.event
 async def on_ready():
