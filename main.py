@@ -79,6 +79,36 @@ async def manual_submit(interaction: discord.Interaction, player: discord.Member
     # Ti conferma che è andato tutto a buon fine senza che nessuno lo legga
     await interaction.followup.send(f"🥷 ✅ Operazione fantasma completata! Screenshot inviato in revisione per conto di {player.mention}.", ephemeral=True)
 
+@bot.tree.command(name="add_alias", description="🔧 Unisce i record di un vecchio nome al nuovo nome (Solo Admin)")
+@app_commands.describe(vecchio_nome="Il nome vecchio (es. blaagoosb)", nuovo_nome="Il nome corretto (es. M2xD)")
+@app_commands.default_permissions(administrator=True) # Solo gli admin possono usarlo
+async def add_alias(interaction: discord.Interaction, vecchio_nome: str, nuovo_nome: str):
+    v_name = vecchio_nome.lower()
+
+    import database_utils
+    async with database_utils.pool.acquire() as conn:
+        # Salviamo nel database
+        await conn.execute(
+            "INSERT INTO Aliases (old_name, new_name) VALUES ($1, $2) ON CONFLICT (old_name) DO UPDATE SET new_name = $2", 
+            v_name, nuovo_nome
+        )
+        # Aggiungiamo anche la doppia sicurezza per le maiuscole (come facevamo su config.py)
+        n_name_lower = nuovo_nome.lower()
+        if v_name != n_name_lower:
+            await conn.execute(
+                "INSERT INTO Aliases (old_name, new_name) VALUES ($1, $2) ON CONFLICT (old_name) DO UPDATE SET new_name = $2", 
+                n_name_lower, nuovo_nome
+            )
+
+    # Aggiorniamo la RAM in tempo reale senza riavviare il bot!
+    await database_utils.load_aliases()
+
+    # Ricalcoliamo subito le classifiche
+    import rankings
+    await rankings.trigger_ranking_update(bot)
+
+    await interaction.response.send_message(f"✅ Identità unite! Tutti i record passati e futuri di `{vecchio_nome}` apparterranno a **{nuovo_nome}**.", ephemeral=True)
+
 async def setup_hook():
     await database_utils.init_pool()
     await database_utils.load_aliases() # AGGIUNGI QUESTA RIGA
