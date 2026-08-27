@@ -220,6 +220,14 @@ class EditWRView(discord.ui.View):
         new_content = re.sub(r'\n\|\|#WR#.*\|\|', '', new_content) # Puliamo i dati nascosti
         await interaction.message.edit(content=new_content, view=self)
         await interaction.message.delete(delay=20)
+
+        # INSERISCI QUESTO: Registriamo l'annullamento
+        await database_utils.log_audit(
+            admin_name=interaction.user.name,
+            action_type="REJECT_WR",
+            target=f"Mappa: {build_key}, Giocatore: {player}",
+            details=f"Tempo annullato: {time_val}"
+        )
         
         import rankings
         await rankings.trigger_ranking_update(self.bot)
@@ -358,6 +366,23 @@ class WRModal(Modal):
                     jump_url = f"https://discord.com/channels/{interaction.guild_id}/{config.WR_CHANNEL_ID}/{new_msg.id}"
                     await conn.execute("INSERT INTO BuildMessages (build_name, message_id) VALUES ($1, $2)", build_key, new_msg.id)
 
+        # INSERISCI QUESTO: Prepariamo e inviamo il log
+        action = "EDIT_WR" if self.is_edit else "ACCEPT_WR"
+        dettagli = f"Nuovo tempo: {new_time}"
+        if self.is_edit:
+            dettagli += f" (Vecchio tempo era: {self.original_view.def_t})"
+            
+        await database_utils.log_audit(
+            admin_name=interaction.user.name,
+            action_type=action,
+            target=f"Mappa: {build_key}, Giocatori: {current_player}",
+            details=dettagli
+        )
+
+        # (Continua con il codice esistente)
+        if self.is_edit:
+            channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
+        
         if self.is_edit:
             channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
             try:
