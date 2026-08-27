@@ -1,4 +1,5 @@
 import discord
+import re
 from discord.ui import Button, View, Modal, TextInput
 import config
 import rankings
@@ -152,75 +153,77 @@ class WrRoundModal(Modal):
 
 
 # --- VIEW PER IL TASTO EDIT (WR NORMALI) ---
-class EditWRView(View):
-    def __init__(self, bot, attachment, update_message, def_b, def_t, def_p, jump_url, original_message):
-        super().__init__(timeout=None)
+class EditWRView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=None) # timeout=None rende i bottoni immortali
         self.bot = bot
-        self.attachment = attachment
-        self.update_message = update_message
-        self.def_b = def_b
-        self.def_t = def_t
-        self.def_p = def_p
-        self.original_message = original_message
-        if jump_url: self.add_item(discord.ui.Button(label="Go to WR", url=jump_url, style=discord.ButtonStyle.link))
 
-    # INSERISCI QUESTO BUTTAFUORI:
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != config.MIO_ID:
-            await interaction.response.send_message("❌ Solo l'amministratore può modificare i record.", ephemeral=True)
-            return False
-        return True
+    def extract_data(self, content):
+        # Il bot cerca l'inchiostro simpatico nel messaggio
+        match = re.search(r'\|\|#WR#\|(.*?)\|(.*?)\|(.*?)\|(.*?)\|\|', content)
+        if match:
+            return match.group(1), match.group(2), float(match.group(3)), int(match.group(4))
+        return None, None, 0.0, None
 
-    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, emoji="✏️")
-    async def edit_btn(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(
-            WRModal(self.bot, self.attachment, self, self.original_message,
-                    is_edit=True, update_message=self.update_message,
-                    def_b=self.def_b, def_t=self.def_t, def_p=self.def_p) 
-        )
+    @discord.ui.button(label="Edit Record", style=discord.ButtonStyle.primary, emoji="✏️", custom_id="persistent_edit_btn")
+    async def edit_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        build, player, time_val, update_msg_id = self.extract_data(interaction.message.content)
+        if not build:
+            return await interaction.response.send_message("❌ Questo è un vecchio record. Usa /manual_submit per modificarlo.", ephemeral=True)
+        
+        attachment = interaction.message.attachments[0] if interaction.message.attachments else None
+        self.def_b = build
+        self.def_p = player
+        self.def_t = str(time_val)
+        self.update_msg_id = update_msg_id
+        
+        modal = WRModal(self.bot, attachment, original_view=self, original_message=interaction.message)
+        await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️")
-    async def undo_btn(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️", custom_id="persistent_undo_btn")
+    async def undo_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        
-        try: await self.update_message.delete()
-        except: pass
-        
+        build_key, player, time_val, update_msg_id = self.extract_data(interaction.message.content)
+        if not build_key:
+            return await interaction.followup.send("❌ Dati mancanti, impossibile annullare automaticamente i vecchi record.", ephemeral=True)
+
+        updates_channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
+        if updates_channel:
+            try:
+                msg_to_delete = await updates_channel.fetch_message(update_msg_id)
+                await msg_to_delete.delete()
+            except: pass
+
         rejected_channel = self.bot.get_channel(config.REJECT_CHANNEL_ID)
-        author_mention = self.original_message.mentions[0].mention if self.original_message.mentions else "l'utente"
-        if rejected_channel and self.attachment:
-            file_to_send = await self.attachment.to_file()
+        author_mention = interaction.message.mentions[0].mention if interaction.message.mentions else "l'utente"
+        if rejected_channel and interaction.message.attachments:
+            file_to_send = await interaction.message.attachments[0].to_file()
             await rejected_channel.send(content=f"Screen rifiutato (dopo annullamento) da {author_mention}:", file=file_to_send)
-        
-        build_key = self.def_b.strip()
+
         msg_id = None
-        
+        import database_utils 
         async with database_utils.pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3",
-                build_key, self.def_p, float(self.def_t)
-            )
+            await conn.execute("DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3", build_key, player, time_val)
             row = await conn.fetchrow("SELECT message_id FROM BuildMessages WHERE LOWER(build_name) = LOWER($1)", build_key)
-            if row: 
-                msg_id = row['message_id']
+            if row: msg_id = row['message_id']
 
         if msg_id:
             testo_formattato = await database_utils.generate_build_message(build_key)
+            import aiohttp
             async with aiohttp.ClientSession() as session:
                 webhook = discord.Webhook.from_url(config.WORLD_RECORDS_WEBHOOK_URL, session=session)
-                try:
-                    await webhook.edit_message(msg_id, content=testo_formattato)
-                except Exception as e:
-                    print(f"Errore ripristino webhook: {e}")
+                try: await webhook.edit_message(msg_id, content=testo_formattato)
+                except: pass
 
         for child in self.children: child.disabled = True
-        new_content = self.original_message.content.replace("**Accepted ✅**", "**Rejected ❌ (Annullato)**")
-        await self.original_message.edit(content=new_content, view=self)
-        await self.original_message.delete(delay=20)
+        new_content = interaction.message.content.replace("**Accepted ✅**", "**Rejected ❌ (Annullato)**")
+        new_content = re.sub(r'\n\|\|#WR#.*\|\|', '', new_content) # Puliamo i dati nascosti
+        await interaction.message.edit(content=new_content, view=self)
+        await interaction.message.delete(delay=20)
         
+        import rankings
         await rankings.trigger_ranking_update(self.bot)
-        await interaction.followup.send("✅ Record annullato, rimosso dal database e mappa ripristinata!", ephemeral=True)
-
+        await interaction.followup.send("✅ Record annullato e database ripristinato (Persistente)!", ephemeral=True)
 # --- MODAL PER SIM WR ---
 class SimWrModal(Modal, title='Cerca link per Sim WR'):
     build_name = TextInput(label='Nome build', placeholder='Es. Caveau', required=True)
