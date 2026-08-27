@@ -15,20 +15,10 @@ SIM_WR_CHANNEL_ID = 1252708706173325342  #sim-wrs
 RANKINGS_CHANNEL_ID = 1252708822359871620  #rankings 
 REJECT_CHANNEL_ID = 1536101024832430251 #rejected-screens
 CANALE_BACKUP_ID = 1537753516632707082  #wrs-backup
+LOG_CHANNEL_ID = 1542546404906369024
 
 # Unico ID per i permessi amministratore
 MIO_ID = 715247279141027890
-
-# --- SISTEMA DEGLI ALIAS ---
-ALIASES = {
-    "namsarr1": "rasman",
-    "namsar": "rasman",
-    "samu_onchill": "boxato",
-    "blaagoosb": "M2xD",
-    "m2xd": "M2xD",
-    "kramperyt": "Myyv",
-    "myyv": "Myyv" # Ricorda di mettere sempre la chiave in minuscolo!
-}
 
 DATABASE_URL = os.getenv('DATABASE_URL')
 
