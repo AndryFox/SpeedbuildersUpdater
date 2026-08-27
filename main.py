@@ -14,7 +14,7 @@ from datetime import datetime
 import database_utils
 import config
 import rankings
-from ui_components import ReviewView
+import ui_components
 from tourneys import setup_tourney_commands
 from rankings import setup_rankings_commands
 
@@ -81,7 +81,8 @@ async def manual_submit(interaction: discord.Interaction, player: discord.Member
 
 async def setup_hook():
     await database_utils.init_pool()
-    print("🗄️ Database Pool inizializzato e linee pronte!")
+    bot.add_view(ui_components.EditWRView(bot)) # <-- Questa è la magia!
+    print("🗄️ Database e Viste Persistenti inizializzati!")
 
 bot.setup_hook = setup_hook
 
