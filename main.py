@@ -100,14 +100,21 @@ async def add_alias(interaction: discord.Interaction, vecchio_nome: str, nuovo_n
                 n_name_lower, nuovo_nome
             )
 
-    # Aggiorniamo la RAM in tempo reale senza riavviare il bot!
-    await database_utils.load_aliases()
-
-    # Ricalcoliamo subito le classifiche
-    import rankings
-    await rankings.trigger_ranking_update(bot)
-
-    await interaction.response.send_message(f"✅ Identità unite! Tutti i record passati e futuri di `{vecchio_nome}` apparterranno a **{nuovo_nome}**.", ephemeral=True)
+    # Aggiorniamo la RAM e ricalcoliamo le classifiche (codice esistente)
+       await database_utils.load_aliases()
+       import rankings
+       await rankings.trigger_ranking_update(bot)
+       
+       # INSERISCI QUESTO: Scriviamo nel log l'azione
+       await database_utils.log_audit(
+           admin_name=interaction.user.name,
+           action_type="ADD_ALIAS",
+           target=f"Vecchio: {vecchio_nome} -> Nuovo: {nuovo_nome}",
+           details="Identità unite manualmente."
+       )
+       
+       # (Codice esistente)
+       await interaction.response.send_message(...)
 
 async def setup_hook():
     await database_utils.init_pool()
