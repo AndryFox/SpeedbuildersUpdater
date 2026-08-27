@@ -66,7 +66,7 @@ async def manual_submit(interaction: discord.Interaction, player: discord.Member
         return await interaction.followup.send("❌ Errore: Canale di revisione non trovato.", ephemeral=True)
 
     # Prepara il file e i bottoni
-    view = ReviewView()
+    view = ui_components.ReviewView()
     file_review = await image.to_file()
 
     # Invia il messaggio fasullo nel canale di revisione
@@ -154,7 +154,7 @@ async def on_ready():
     print(f"✅ Bot {bot.user} avviato con successo e collegato al Cloud!")
 
     # --- REGISTRA I BOTTONI IMMORTALI QUI ---
-    bot.add_view(ReviewView())
+    bot.add_view(ui_components.ReviewView())
 
     setup_tourney_commands(bot)
     setup_rankings_commands(bot)
@@ -188,7 +188,7 @@ async def on_message(message):
         review_channel = bot.get_channel(config.REVIEW_CHANNEL_ID)
         
         for attachment in message.attachments:
-            view = ReviewView()
+            view = ui_components.ReviewView()
             file_review = await attachment.to_file()
             
             await review_channel.send(
