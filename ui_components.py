@@ -378,10 +378,6 @@ class WRModal(Modal):
             target=f"Mappa: {build_key}, Giocatori: {current_player}",
             details=dettagli
         )
-
-        # (Continua con il codice esistente)
-        if self.is_edit:
-            channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
         
         if self.is_edit:
             channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
