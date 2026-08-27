@@ -22,6 +22,14 @@ async def load_aliases():
             ALIASES_CACHE[row['old_name']] = row['new_name']
     print(f"🔄 Caricati {len(ALIASES_CACHE)} alias dal database.")
 
+async def log_audit(admin_name: str, action_type: str, target: str, details: str = ""):
+    """Scrive un'azione nel registro di AuditLog su Supabase."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO AuditLog (admin_name, action_type, target, details) VALUES ($1, $2, $3, $4)",
+            admin_name, action_type, target, details
+        )
+
 def get_main_name(player_name: str) -> str:
     """Controlla se il giocatore ha un alias nella cache."""
     lower_name = player_name.lower()
