@@ -359,23 +359,33 @@ class WRModal(Modal):
                     await conn.execute("INSERT INTO BuildMessages (build_name, message_id) VALUES ($1, $2)", build_key, new_msg.id)
 
         if self.is_edit:
-            await self.update_message.edit(content=testo_record)
-            self.original_view.def_b = build_key
-            self.original_view.def_t = self.time_val.value
-            self.original_view.def_p = current_player
-            await self.original_message.edit(view=self.original_view)
-            await interaction.followup.send(f"✅ Modifica salvata e canale aggiornato!\n🔗 **Vai al record:** {jump_url or 'N/A'}", ephemeral=True)
+            channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
+            try:
+                msg_to_edit = await channel.fetch_message(self.original_view.update_msg_id)
+                await msg_to_edit.edit(content=testo_record)
+            except: pass
+            
+            # Nascondiamo i nuovi dati
+            hidden_data = f"||#WR#|{build_key}|{current_player}|{new_time}|{self.original_view.update_msg_id}||"
+            new_content_msg = re.sub(r'\n\|\|#WR#.*\|\|', '', self.original_message.content)
+            new_content_msg += f"\n{hidden_data}"
+            
+            await self.original_message.edit(content=new_content_msg, view=self.original_view)
+            await interaction.followup.send(f"✅ Modifica salvata!\n🔗 **Vai al record:** {jump_url or 'N/A'}", ephemeral=True)
         else:
             channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
             file_da_inviare = await self.attachment.to_file()
             update_msg = await channel.send(content=testo_record, file=file_da_inviare)
             
-            edit_view = EditWRView(self.bot, self.attachment, update_msg, build_key, self.time_val.value, current_player, jump_url, self.original_message)
-            new_content = f"{self.original_message.content} - **Accepted ✅**"
-            await self.original_message.edit(content=new_content, view=edit_view)
+            # Stampiamo i dati invisibili alla fine del messaggio di revisione
+            hidden_data = f"||#WR#|{build_key}|{current_player}|{new_time}|{update_msg.id}||"
+            new_content = f"{self.original_message.content} - **Accepted ✅**\n{hidden_data}"
             
-            await interaction.followup.send(f"✅ Record approvato e canale aggiornato automaticamente!\n🔗 **Vai al record:** {jump_url or 'N/A'}", ephemeral=True)
+            edit_view = EditWRView(self.bot)
+            await self.original_message.edit(content=new_content, view=edit_view)
+            await interaction.followup.send(f"✅ Record approvato!\n🔗 **Vai al record:** {jump_url or 'N/A'}", ephemeral=True)
 
+        import rankings
         await rankings.trigger_ranking_update(self.bot)
 
 # --- BOTTONI SOTTO LO SCREEN (RESI IMMORTALI) ---
