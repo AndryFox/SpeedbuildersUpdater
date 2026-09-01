@@ -105,20 +105,11 @@ async def add_alias(interaction: discord.Interaction, vecchio_nome: str, nuovo_n
     import rankings
     await rankings.trigger_ranking_update(bot)
        
-    # Scriviamo nel log l'azione
-    await database_utils.log_audit(
-        admin_name=interaction.user.name,
-        action_type="ADD_ALIAS",
-        target=f"Vecchio: {vecchio_nome} -> Nuovo: {nuovo_nome}",
-        details="Identità unite manualmente."
-    )
-       
     await interaction.response.send_message(f"✅ Identità unite! Tutti i record passati e futuri di `{vecchio_nome}` apparterranno a **{nuovo_nome}**.", ephemeral=True)
 
 async def setup_hook():
     await database_utils.init_pool()
     await database_utils.load_aliases() # AGGIUNGI QUESTA RIGA
-    bot.add_view(ui_components.EditWRView(bot))
     print("🗄️ Database e Viste Persistenti inizializzati!")
 
 bot.setup_hook = setup_hook
@@ -152,9 +143,6 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
 @bot.event
 async def on_ready():
     print(f"✅ Bot {bot.user} avviato con successo e collegato al Cloud!")
-
-    # --- REGISTRA I BOTTONI IMMORTALI QUI ---
-    bot.add_view(ui_components.ReviewView())
 
     setup_tourney_commands(bot)
     setup_rankings_commands(bot)
