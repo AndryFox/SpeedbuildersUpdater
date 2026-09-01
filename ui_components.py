@@ -380,7 +380,7 @@ class WRModal(Modal):
 # --- BOTTONI SOTTO LO SCREEN (RESI IMMORTALI) ---
 class ReviewView(View):
     def __init__(self):
-        super().__init__() 
+        super().__init__(timeout=None)
 
     # INSERISCI QUESTO BUTTAFUORI:
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
