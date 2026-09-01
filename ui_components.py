@@ -154,38 +154,27 @@ class WrRoundModal(Modal):
 
 # --- VIEW PER IL TASTO EDIT (WR NORMALI) ---
 class EditWRView(discord.ui.View):
-    def __init__(self, bot):
-        super().__init__(timeout=None) # timeout=None rende i bottoni immortali
+    def __init__(self, bot, wr_url: str, def_b: str, def_p: str, def_t: float, update_msg_id: int):
+        super().__init__() 
         self.bot = bot
-
-    def extract_data(self, content):
-        # Il bot cerca l'inchiostro simpatico nel messaggio
-        match = re.search(r'\|\|#WR#\|(.*?)\|(.*?)\|(.*?)\|(.*?)\|\|', content)
-        if match:
-            return match.group(1), match.group(2), float(match.group(3)), int(match.group(4))
-        return None, None, 0.0, None
-
-    @discord.ui.button(label="Edit Record", style=discord.ButtonStyle.primary, emoji="✏️", custom_id="persistent_edit_btn")
-    async def edit_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        build, player, time_val, update_msg_id = self.extract_data(interaction.message.content)
-        if not build:
-            return await interaction.response.send_message("❌ Questo è un vecchio record. Usa /manual_submit per modificarlo.", ephemeral=True)
-        
-        attachment = interaction.message.attachments[0] if interaction.message.attachments else None
-        self.def_b = build
-        self.def_p = player
-        self.def_t = str(time_val)
+        self.def_b = def_b
+        self.def_p = def_p
+        self.def_t = str(def_t)
         self.update_msg_id = update_msg_id
         
-        modal = WRModal(self.bot, attachment, original_view=self, original_message=interaction.message)
+        if wr_url:
+            self.add_item(discord.ui.Button(label="Go to WR", url=wr_url, row=0))
+
+    @discord.ui.button(label="Edit Record", style=discord.ButtonStyle.primary, emoji="✏️")
+    async def edit_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        attachment = interaction.message.attachments[0] if interaction.message.attachments else None
+        modal = WRModal(self.bot, attachment, original_view=self, original_message=interaction.message, is_edit=True)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️", custom_id="persistent_undo_btn")
+    @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def undo_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        build_key, player, time_val, update_msg_id = self.extract_data(interaction.message.content)
-        if not build_key:
-            return await interaction.followup.send("❌ Dati mancanti, impossibile annullare automaticamente i vecchi record.", ephemeral=True)
+        build_key, player, time_val, update_msg_id = self.def_b, self.def_p, float(self.def_t), self.update_msg_id
 
         updates_channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
         if updates_channel:
@@ -217,21 +206,13 @@ class EditWRView(discord.ui.View):
 
         for child in self.children: child.disabled = True
         new_content = interaction.message.content.replace("**Accepted ✅**", "**Rejected ❌ (Annullato)**")
-        new_content = re.sub(r'\n\|\|#WR#.*\|\|', '', new_content) # Puliamo i dati nascosti
         await interaction.message.edit(content=new_content, view=self)
         await interaction.message.delete(delay=20)
-
-        # INSERISCI QUESTO: Registriamo l'annullamento
-        await database_utils.log_audit(
-            admin_name=interaction.user.name,
-            action_type="REJECT_WR",
-            target=f"Mappa: {build_key}, Giocatore: {player}",
-            details=f"Tempo annullato: {time_val}"
-        )
         
         import rankings
         await rankings.trigger_ranking_update(self.bot)
-        await interaction.followup.send("✅ Record annullato e database ripristinato (Persistente)!", ephemeral=True)
+        await interaction.followup.send("✅ Record annullato e database ripristinato!", ephemeral=True)
+        
 # --- MODAL PER SIM WR ---
 class SimWrModal(Modal, title='Cerca link per Sim WR'):
     build_name = TextInput(label='Nome build', placeholder='Es. Caveau', required=True)
@@ -379,33 +360,27 @@ class WRModal(Modal):
                 await msg_to_edit.edit(content=testo_record)
             except: pass
             
-            # Nascondiamo i nuovi dati
-            hidden_data = f"||#WR#|{build_key}|{current_player}|{new_time}|{self.original_view.update_msg_id}||"
             new_content_msg = re.sub(r'\n\|\|#WR#.*\|\|', '', self.original_message.content)
-            new_content_msg += f"\n{hidden_data}"
-            
             await self.original_message.edit(content=new_content_msg, view=self.original_view)
-            await interaction.followup.send(f"✅ Modifica salvata!\n🔗 **Vai al record:** {jump_url or 'N/A'}", ephemeral=True)
+            await interaction.followup.send("✅ Modifica salvata!", ephemeral=True)
         else:
             channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
             file_da_inviare = await self.attachment.to_file()
             update_msg = await channel.send(content=testo_record, file=file_da_inviare)
             
-            # Stampiamo i dati invisibili alla fine del messaggio di revisione
-            hidden_data = f"||#WR#|{build_key}|{current_player}|{new_time}|{update_msg.id}||"
-            new_content = f"{self.original_message.content} - **Accepted ✅**\n{hidden_data}"
+            new_content = f"{self.original_message.content} - **Accepted ✅**"
             
-            edit_view = EditWRView(self.bot)
+            edit_view = EditWRView(self.bot, jump_url, build_key, current_player, new_time, update_msg.id)
             await self.original_message.edit(content=new_content, view=edit_view)
-            await interaction.followup.send(f"✅ Record approvato!\n🔗 **Vai al record:** {jump_url or 'N/A'}", ephemeral=True)
-
+            await interaction.followup.send("✅ Record approvato!", ephemeral=True)
+        
         import rankings
         await rankings.trigger_ranking_update(self.bot)
 
 # --- BOTTONI SOTTO LO SCREEN (RESI IMMORTALI) ---
 class ReviewView(View):
     def __init__(self):
-        super().__init__(timeout=None) 
+        super().__init__() 
 
     # INSERISCI QUESTO BUTTAFUORI:
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -414,12 +389,12 @@ class ReviewView(View):
             return False
         return True
 
-    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success, custom_id="btn_accept_review")
+    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
     async def accept_btn(self, interaction: discord.Interaction, button: Button):
         attachment = interaction.message.attachments[0] if interaction.message.attachments else None
         await interaction.response.send_modal(WRModal(interaction.client, attachment, self, interaction.message))
 
-    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, custom_id="btn_reject_review")
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger)
     async def reject_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
         rejected_channel = interaction.client.get_channel(config.REJECT_CHANNEL_ID)
@@ -434,11 +409,11 @@ class ReviewView(View):
         await interaction.message.delete(delay=20)
         await interaction.followup.send(f"Screen spostato in <#{config.REJECT_CHANNEL_ID}>.", ephemeral=True)
 
-    @discord.ui.button(label="Wr Round", style=discord.ButtonStyle.primary, custom_id="btn_round_review")
+    @discord.ui.button(label="Wr Round", style=discord.ButtonStyle.primary)
     async def round_btn(self, interaction: discord.Interaction, button: Button):
         attachment = interaction.message.attachments[0] if interaction.message.attachments else None
         await interaction.response.send_modal(WrRoundModal(interaction.client, attachment, self, interaction.message))
 
-    @discord.ui.button(label="Sim Wr", style=discord.ButtonStyle.secondary, custom_id="btn_sim_review")
+    @discord.ui.button(label="Sim Wr", style=discord.ButtonStyle.secondary)
     async def sim_wr_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(SimWrModal(interaction.client, self, interaction.message))
