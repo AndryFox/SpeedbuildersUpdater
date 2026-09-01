@@ -165,7 +165,7 @@ class EditWRView(discord.ui.View):
         if wr_url:
             self.add_item(discord.ui.Button(label="Go to WR", url=wr_url, row=0))
 
-    @discord.ui.button(label="Edit Record", style=discord.ButtonStyle.primary, emoji="✏️")
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, emoji="✏️")
     async def edit_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         attachment = interaction.message.attachments[0] if interaction.message.attachments else None
         modal = WRModal(self.bot, attachment, original_view=self, original_message=interaction.message, is_edit=True)
