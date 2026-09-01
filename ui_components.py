@@ -371,13 +371,6 @@ class WRModal(Modal):
         dettagli = f"Nuovo tempo: {new_time}"
         if self.is_edit:
             dettagli += f" (Vecchio tempo era: {self.original_view.def_t})"
-            
-        await database_utils.log_audit(
-            admin_name=interaction.user.name,
-            action_type=action,
-            target=f"Mappa: {build_key}, Giocatori: {current_player}",
-            details=dettagli
-        )
         
         if self.is_edit:
             channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
