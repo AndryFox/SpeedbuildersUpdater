@@ -240,13 +240,260 @@ def setup_rankings_commands(bot):
             msg = await webhook.send(content=initial_text, username="Rankings Updater", wait=True)
         await interaction.followup.send(f"✅ Ranking Rounds created! Copy this ID into config.py:\n**{msg.id}**")
 
-    # ---> LA FUNZIONE AUTOCOMPLETE DEVE STARE QUI, PRIMA DEL COMANDO WRS <---
+# --- FUNZIONI DI AUTOCOMPLETAMENTO (Condivise per /wrs, /wrssim, /buildtimes) ---
+    async def build_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        async with database_utils.pool.acquire() as conn:
+            if not current:
+                rows = await conn.fetch("SELECT DISTINCT build_name FROM WorldRecords ORDER BY build_name LIMIT 25")
+            else:
+                rows = await conn.fetch("SELECT DISTINCT build_name FROM WorldRecords WHERE build_name ILIKE $1 ORDER BY build_name LIMIT 25", f"%{current}%")
+            return [app_commands.Choice(name=row['build_name'], value=row['build_name']) for row in rows]
+
     async def player_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        choices = [
-            app_commands.Choice(name=player, value=player)
-            for player in PLAYERS_CACHE if current.lower() in player.lower()
-        ]
-        return choices[:25] 
+        current_lower = current.lower()
+        async with database_utils.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT DISTINCT player_name FROM WorldRecords")
+        
+        main_names = set()
+        for row in rows:
+            main_names.add(database_utils.get_main_name(row['player_name']))
+        for new_name in database_utils.ALIASES_CACHE.values():
+            main_names.add(new_name)
+            
+        choices = []
+        for name in main_names:
+            if current_lower and current_lower not in name.lower():
+                continue
+            choices.append(app_commands.Choice(name=name, value=name))
+                
+        choices = sorted(choices, key=lambda x: x.name.lower())
+        return choices[:25]
+
+
+    # --- COMANDO 1: /wrs ---
+    @bot.tree.command(name="wrs", description="Check all WRs and times of a player (visible only to you)")
+    @app_commands.describe(player="The name of the player to search")
+    @app_commands.autocomplete(player=player_autocomplete)
+    async def check_wrs(interaction: discord.Interaction, player: str):
+        if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
+            return await interaction.response.send_message(f"⚠️️ This command can only be used in <#{config.SUBMISSION_CHANNEL_ID}>.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        
+        player_norm = database_utils.get_main_name(player.replace("\\", ""))
+        records = []
+        
+        async with database_utils.pool.acquire() as conn:
+            query = """
+                SELECT r1.build_name, r1.time, r1.player_name
+                FROM WorldRecords r1
+                WHERE r1.time = (SELECT MIN(time) FROM WorldRecords r2 WHERE LOWER(r1.build_name) = LOWER(r2.build_name))
+                ORDER BY LOWER(r1.build_name) ASC
+            """
+            rows = await conn.fetch(query)
+            for row in rows:
+                build_name = row['build_name']
+                time_val = row['time']
+                player_db = row['player_name']
+                
+                if database_utils.get_main_name(player_db) == player_norm:
+                    records.append(f"▸ Build: **{build_name}** ⸻ `{time_val}s`")
+                        
+        count = len(records)
+        
+        if count > 0:
+            ruolo = get_role_tag(count)
+            nome_estetico = DISPLAY_NAMES_CACHE.get(player_norm, player)
+            avatar_url = f"https://minotar.net/helm/{player_norm}/256.png"
+            
+            embed = discord.Embed(description=f"**Current Rank:** {ruolo}\n\n", color=discord.Color.gold())
+            embed.set_author(name=f"{nome_estetico}'s World Records ({count})", icon_url=avatar_url)
+            embed.set_thumbnail(url=avatar_url)
+            
+            lista_formattata = "\n".join(records)
+            if len(lista_formattata) > 3900: 
+                lista_formattata = lista_formattata[:3900] + "\n\n*... and more (text limit reached)!*"
+            embed.description += lista_formattata
+            
+            icon_url = bot.user.avatar.url if bot.user.avatar else None
+            embed.set_footer(text="FearGames Speedbuilders", icon_url=icon_url)
+            await interaction.followup.send(embed=embed)
+        else:
+            await interaction.followup.send(f"📉 **{player}** is not in the rankings yet or has no WRs at the moment.")
+
+
+    # --- COMANDO 2: /wrssim ---
+    @bot.tree.command(name="wrssim", description="Mostra tutti i Sim WR di un giocatore (visibile solo a te)")
+    @app_commands.describe(player="Nome del giocatore")
+    @app_commands.autocomplete(player=player_autocomplete)
+    async def wrssim_cmd(interaction: discord.Interaction, player: str):
+        await interaction.response.defer(ephemeral=True)
+        
+        target_norm = database_utils.get_main_name(player.strip()) 
+        target_cmp = target_norm.lower().replace("_", "").replace("\\", "").strip()
+        sim_channel = interaction.client.get_channel(config.SIM_WR_CHANNEL_ID)
+        records = []
+        
+        if sim_channel:
+            async for message in sim_channel.history(limit=500):
+                if not message.content: continue
+                for line in message.content.split('\n'):
+                    raw_line = line.replace("*", "").replace(">", "").strip()
+                    
+                    if ":" in raw_line:
+                        try:
+                            parts = raw_line.split(':', 1)
+                            build_name = parts[0].strip()
+                            rest_of_line = parts[1].strip()
+                            
+                            if not rest_of_line:
+                                continue
+                                
+                            if "-" in rest_of_line:
+                                time_part, player_part = rest_of_line.split('-', 1)
+                                time_val = time_part.strip().lower().replace("s", "")
+                            else:
+                                time_val = ""
+                                player_part = rest_of_line
+                        except:
+                            continue
+                        
+                        sim_players = [p.strip() for p in player_part.split('/')]
+                        
+                        import re
+                        for p in sim_players:
+                            clean_p = re.sub(r'`?\(.*?\)`?', '', p)
+                            clean_p = re.sub(r'\[.*?\]', '', clean_p).replace("\\", "").replace("`", "").strip()
+                            
+                            main_p = database_utils.get_main_name(clean_p) 
+                            main_p_cmp = main_p.lower().replace("_", "").replace("\\", "").strip()
+                            
+                            if target_cmp == main_p_cmp:
+                                retime_match = re.search(r'\((retime.*?)\)', p, re.IGNORECASE)
+                                retime_str = f" **`{retime_match.group(0)}`**" if retime_match else ""
+                                
+                                display_time = time_val
+                                if not display_time and retime_match:
+                                    num_match = re.search(r'[\d\.]+', retime_match.group(1))
+                                    if num_match:
+                                        display_time = num_match.group(0)
+                                if not display_time:
+                                    display_time = "?"
+                                
+                                safe_name = clean_p.replace("_", "\\_")
+                                records.append(f"▸ Build: **{build_name}** ⸻ `{display_time}s` - {safe_name}{retime_str}")
+                                break
+                                
+        count = len(records)
+        
+        if count > 0:
+            avatar_url = f"https://minotar.net/helm/{target_norm}/256.png"
+            nome_estetico = DISPLAY_NAMES_CACHE.get(target_norm, target_norm) 
+            
+            embed = discord.Embed(color=discord.Color.green())
+            embed.set_author(name=f"{nome_estetico}'s Sim WRs ({count})", icon_url=avatar_url)
+            embed.set_thumbnail(url=avatar_url)
+            
+            lista_formattata = "\n".join(records)
+            if len(lista_formattata) > 3900: 
+                lista_formattata = lista_formattata[:3900] + "\n\n*... and more (text limit reached)!*"
+                
+            embed.description = lista_formattata
+            
+            icon_url = interaction.client.user.avatar.url if interaction.client.user.avatar else None
+            embed.set_footer(text="FearGames Speedbuilders", icon_url=icon_url)
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            safe_player = player.title().replace("_", "\\_")
+            await interaction.followup.send(f"📉 **{safe_player}** is not in the rankings yet or has no Sim WRs at the moment.", ephemeral=True)
+
+
+    # --- COMANDO 3: /buildtimes ---
+    @bot.tree.command(name="buildtimes", description="Mostra la Top 3 e il Sim WR di una build (visibile solo a te)")
+    @app_commands.describe(build="Nome della build da cercare")
+    @app_commands.autocomplete(build=build_autocomplete)
+    async def buildtimes_cmd(interaction: discord.Interaction, build: str):
+        await interaction.response.defer(ephemeral=True)
+        
+        top3_text = ""
+        top1_norm_name = None
+        
+        async with database_utils.pool.acquire() as conn:
+            query = """
+                SELECT player_name, time 
+                FROM WorldRecords 
+                WHERE LOWER(build_name) = LOWER($1)
+                ORDER BY time ASC
+            """
+            rows = await conn.fetch(query, build.strip())
+            
+        if not rows:
+            top3_text = "Nessun record ufficiale trovato."
+        else:
+            top1_norm_name = database_utils.get_main_name(rows[0]['player_name'])
+            
+            best_times = {}
+            display_names = {} 
+            
+            for row in rows:
+                p_name = row['player_name']
+                t_val = row['time']
+                norm_name = database_utils.get_main_name(p_name)
+                
+                if norm_name not in best_times or t_val < best_times[norm_name]:
+                    best_times[norm_name] = t_val
+                    display_names[norm_name] = p_name 
+            
+            time_groups = {}
+            for p_norm, t in best_times.items():
+                if t not in time_groups: time_groups[t] = []
+                safe_name = display_names[p_norm].replace("_", "\\_")
+                time_groups[t].append(safe_name)
+                
+            sorted_times = sorted(time_groups.keys())
+            
+            medals = ["🥇 1st", "🥈 2nd", "🥉 3rd"]
+            for i in range(min(3, len(sorted_times))):
+                t = sorted_times[i]
+                players = " / ".join(time_groups[t])
+                top3_text += f"{medals[i]}: **{players}** ({t}s)\n"
+
+        sim_channel = interaction.client.get_channel(config.SIM_WR_CHANNEL_ID)
+        sim_text = "Nessun Sim WR trovato per questa build."
+        build_clean = build.lower().strip()
+        
+        if sim_channel:
+            found = False
+            async for message in sim_channel.history(limit=500):
+                if not message.content: continue
+                for line in message.content.split('\n'):
+                    raw_line = line.replace("*", "").replace(">", "").replace("`", "").strip()
+                    build_check_line = raw_line.lower().replace("_", "")
+                    
+                    if build_check_line.startswith(f"{build_clean}:") or build_check_line.startswith(f"{build_clean} :"):
+                        if ":" in raw_line:
+                            rest_of_line = raw_line.split(":", 1)[1].strip()
+                        else:
+                            rest_of_line = raw_line
+                            
+                        sim_text = f"**{rest_of_line}**"
+                        found = True
+                        break
+                if found: break
+
+        embed = discord.Embed(title=f"⏱️ Statistiche Build: {build.title()}", color=discord.Color.blue())
+        
+        if top1_norm_name:
+            avatar_url = f"https://minotar.net/helm/{top1_norm_name}/256.png"
+            embed.set_thumbnail(url=avatar_url)
+            
+        embed.add_field(name="🏆 Top 3 Ufficiale", value=top3_text, inline=False)
+        embed.add_field(name="🔄 Sim WR", value=sim_text, inline=False)
+        
+        icon_url = interaction.client.user.avatar.url if interaction.client.user.avatar else None
+        embed.set_footer(text="FearGames Speedbuilders", icon_url=icon_url)
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @bot.tree.command(name="wrs", description="Check all WRs and times of a player (visible only to you)")
     @app_commands.describe(player="The name of the player to search")
