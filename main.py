@@ -194,6 +194,8 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
     
     # 1. Trova la Top 3 dal Database (WR Ufficiali)
     top3_text = ""
+    top1_norm_name = None
+    
     async with database_utils.pool.acquire() as conn:
         query = """
             SELECT player_name, time 
@@ -206,29 +208,37 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
     if not rows:
         top3_text = "Nessun record ufficiale trovato."
     else:
+        # Essendo ordinati per tempo crescente (ASC), il primo della lista è il detentore del WR assoluto
+        top1_norm_name = database_utils.get_main_name(rows[0]['player_name'])
+        
         best_times = {}
+        display_names = {} 
+        
         for row in rows:
             p_name = row['player_name']
             t_val = row['time']
             norm_name = database_utils.get_main_name(p_name)
+            
             if norm_name not in best_times or t_val < best_times[norm_name]:
                 best_times[norm_name] = t_val
+                display_names[norm_name] = p_name 
         
         time_groups = {}
-        for p, t in best_times.items():
+        for p_norm, t in best_times.items():
             if t not in time_groups: time_groups[t] = []
-            time_groups[t].append(p)
+            safe_name = display_names[p_norm].replace("_", "\\_")
+            time_groups[t].append(safe_name)
             
         sorted_times = sorted(time_groups.keys())
         
         medals = ["🥇 1st", "🥈 2nd", "🥉 3rd"]
         for i in range(min(3, len(sorted_times))):
             t = sorted_times[i]
-            players = " / ".join([p.title() for p in time_groups[t]])
+            players = " / ".join(time_groups[t])
             top3_text += f"{medals[i]}: **{players}** ({t}s)\n"
 
     # 2. Cerca il Sim WR leggendo il canale dedicato
-    sim_channel = bot.get_channel(config.SIM_WR_CHANNEL_ID)
+    sim_channel = interaction.client.get_channel(config.SIM_WR_CHANNEL_ID)
     sim_text = "Nessun Sim WR trovato per questa build."
     build_clean = build.lower().strip()
     
@@ -237,24 +247,36 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
         async for message in sim_channel.history(limit=500):
             if not message.content: continue
             for line in message.content.split('\n'):
-                # Manteniamo gli _ nella stringa grezza per la visualizzazione
                 raw_line = line.replace("*", "").replace(">", "").replace("`", "").strip()
-                # Creiamo una versione senza _ SOLO per fare il controllo iniziale della build
                 build_check_line = raw_line.lower().replace("_", "")
                 
                 if build_check_line.startswith(f"{build_clean}:") or build_check_line.startswith(f"{build_clean} :"):
-                    sim_text = f"**{raw_line}**\n[🔗 Vai al messaggio originale]({message.jump_url})"
+                    if ":" in raw_line:
+                        rest_of_line = raw_line.split(":", 1)[1].strip()
+                    else:
+                        rest_of_line = raw_line
+                        
+                    sim_text = f"**{rest_of_line}**"
                     found = True
                     break
             if found: break
 
     # 3. Crea l'Embed e lo invia
     embed = discord.Embed(title=f"⏱️ Statistiche Build: {build.title()}", color=discord.Color.blue())
+    
+    # Aggiunge la testa 256x256 di Minotar del Top 1 se esiste almeno un record
+    if top1_norm_name:
+        avatar_url = f"https://minotar.net/helm/{top1_norm_name}/256.png"
+        embed.set_thumbnail(url=avatar_url)
+        
     embed.add_field(name="🏆 Top 3 Ufficiale", value=top3_text, inline=False)
     embed.add_field(name="🔄 Sim WR", value=sim_text, inline=False)
     
+    # Aggiunge il footer globale FearGames Speedbuilders
+    icon_url = interaction.client.user.avatar.url if interaction.client.user.avatar else None
+    embed.set_footer(text="FearGames Speedbuilders", icon_url=icon_url)
+    
     await interaction.followup.send(embed=embed, ephemeral=True)
-
 
 # --- COMANDO: /wrssim ---
 @bot.tree.command(name="wrssim", description="Mostra tutti i Sim WR di un giocatore (visibile solo a te)")
