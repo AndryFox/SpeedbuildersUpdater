@@ -2,8 +2,6 @@ import discord
 from discord import app_commands 
 from discord.ext import commands
 import os
-from flask import Flask
-from threading import Thread
 import re
 import asyncio
 import aiohttp
@@ -17,24 +15,6 @@ import rankings
 import ui_components
 from tourneys import setup_tourney_commands
 from rankings import setup_rankings_commands
-
-# --- SEZIONE PER MANTENERE IL BOT ATTIVO SU RENDER ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot Online!"
-
-def run():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-keep_alive()
-# ----------------------------------------------------
 
 # Inizializza il bot
 intents = discord.Intents.default()
