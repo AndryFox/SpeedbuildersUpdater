@@ -284,7 +284,8 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
                         clean_p = re.sub(r'\[.*?\]', '', clean_p).strip()
                         sim_players_norm.append(database_utils.get_main_name(clean_p))
                     
-                    if target_norm in sim_players_norm:
+                    # Confrontiamo tutto in minuscolo per ignorare il Case-Sensitive
+                    if target_norm.lower() in [name.lower() for name in sim_players_norm]:
                         original_line = line.replace("*", "").replace("_", "").replace(">", "").replace("`", "").strip()
                         wrs_found.append(f"• {original_line} - [🔗 Link]({message.jump_url})")
 
