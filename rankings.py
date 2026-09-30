@@ -322,8 +322,8 @@ def setup_rankings_commands(bot):
 
 
     # --- COMANDO 2: /wrssim ---
-    @bot.tree.command(name="wrssim", description="Mostra tutti i Sim WR di un giocatore (visibile solo a te)")
-    @app_commands.describe(player="Nome del giocatore")
+    @bot.tree.command(name="wrssim", description="Check all Sim WRs of a player (visible only to you)")
+    @app_commands.describe(player="The name of the player to search")
     @app_commands.autocomplete(player=player_autocomplete)
     async def wrssim_cmd(interaction: discord.Interaction, player: str):
         await interaction.response.defer(ephemeral=True)
@@ -409,8 +409,8 @@ def setup_rankings_commands(bot):
 
 
     # --- COMANDO 3: /buildtimes ---
-    @bot.tree.command(name="buildtimes", description="Mostra la Top 3 e il Sim WR di una build (visibile solo a te)")
-    @app_commands.describe(build="Nome della build da cercare")
+    @bot.tree.command(name="buildtimes", description="Check the Top 3 and Sim WR of a build (visible only to you)")
+    @app_commands.describe(build="The name of the build to search")
     @app_commands.autocomplete(build=build_autocomplete)
     async def buildtimes_cmd(interaction: discord.Interaction, build: str):
         await interaction.response.defer(ephemeral=True)
@@ -428,7 +428,7 @@ def setup_rankings_commands(bot):
             rows = await conn.fetch(query, build.strip())
             
         if not rows:
-            top3_text = "Nessun record ufficiale trovato."
+            top3_text = "No official records found."
         else:
             top1_norm_name = database_utils.get_main_name(rows[0]['player_name'])
             
@@ -459,7 +459,7 @@ def setup_rankings_commands(bot):
                 top3_text += f"{medals[i]}: **{players}** ({t}s)\n"
 
         sim_channel = interaction.client.get_channel(config.SIM_WR_CHANNEL_ID)
-        sim_text = "Nessun Sim WR trovato per questa build."
+        sim_text = "No Sim WRs found for this build."
         build_clean = build.lower().strip()
         
         if sim_channel:
@@ -481,13 +481,13 @@ def setup_rankings_commands(bot):
                         break
                 if found: break
 
-        embed = discord.Embed(title=f"⏱️ Statistiche Build: {build.title()}", color=discord.Color.blue())
+        embed = discord.Embed(title=f"⏱️ Build Stats: {build.title()}", color=discord.Color.blue())
         
         if top1_norm_name:
             avatar_url = f"https://minotar.net/helm/{top1_norm_name}/256.png"
             embed.set_thumbnail(url=avatar_url)
             
-        embed.add_field(name="🏆 Top 3 Ufficiale", value=top3_text, inline=False)
+        embed.add_field(name="🏆 Official Top 3", value=top3_text, inline=False)
         embed.add_field(name="🔄 Sim WR", value=sim_text, inline=False)
         
         icon_url = interaction.client.user.avatar.url if interaction.client.user.avatar else None
