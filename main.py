@@ -140,6 +140,126 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
     else:
         await interaction.response.send_message("❌ Ops! Si è verificato un errore interno. L'amministratore è stato avvisato.", ephemeral=True)
 
+# --- COMANDO: /buildtimes ---
+@bot.tree.command(name="buildtimes", description="Mostra la Top 3 e il Sim WR di una build (visibile solo a te)")
+@app_commands.describe(build="Nome della build da cercare")
+async def buildtimes_cmd(interaction: discord.Interaction, build: str):
+    # Risponde in modo effimero (invisibile agli altri)
+    await interaction.response.defer(ephemeral=True)
+    
+    # 1. Trova la Top 3 dal Database (WR Ufficiali)
+    top3_text = ""
+    async with database_utils.pool.acquire() as conn:
+        query = """
+            SELECT player_name, time 
+            FROM WorldRecords 
+            WHERE LOWER(build_name) = LOWER($1)
+            ORDER BY time ASC
+        """
+        rows = await conn.fetch(query, build.strip())
+        
+    if not rows:
+        top3_text = "Nessun record ufficiale trovato."
+    else:
+        # Raggruppa i tempi migliori per giocatore
+        best_times = {}
+        for row in rows:
+            p_name = row['player_name']
+            t_val = row['time']
+            norm_name = database_utils.get_main_name(p_name)
+            if norm_name not in best_times or t_val < best_times[norm_name]:
+                best_times[norm_name] = t_val
+        
+        # Raggruppa i giocatori per tempo (in caso di parità)
+        time_groups = {}
+        for p, t in best_times.items():
+            if t not in time_groups: time_groups[t] = []
+            time_groups[t].append(p)
+            
+        sorted_times = sorted(time_groups.keys())
+        
+        medals = ["🥇 1st", "🥈 2nd", "🥉 3rd"]
+        for i in range(min(3, len(sorted_times))):
+            t = sorted_times[i]
+            # Mette l'iniziale maiuscola ai nomi per estetica
+            players = " / ".join([p.title() for p in time_groups[t]])
+            top3_text += f"{medals[i]}: **{players}** ({t}s)\n"
+
+    # 2. Cerca il Sim WR leggendo il canale dedicato
+    sim_channel = bot.get_channel(config.SIM_WR_CHANNEL_ID)
+    sim_text = "Nessun Sim WR trovato per questa build."
+    build_clean = build.lower().strip()
+    
+    if sim_channel:
+        found = False
+        async for message in sim_channel.history(limit=500):
+            if not message.content: continue
+            for line in message.content.split('\n'):
+                # Pulisce la riga da grassetti e corsivi per leggerla bene
+                clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").strip()
+                if clean_line.startswith(f"{build_clean}:") or clean_line.startswith(f"{build_clean} :"):
+                    original_line = line.replace("*", "").replace("_", "").replace(">", "").strip()
+                    sim_text = f"**{original_line}**\n[🔗 Vai al messaggio originale]({message.jump_url})"
+                    found = True
+                    break
+            if found: break
+
+    # 3. Crea l'Embed e lo invia
+    embed = discord.Embed(title=f"⏱️ Statistiche Build: {build.title()}", color=discord.Color.blue())
+    embed.add_field(name="🏆 Top 3 Ufficiale", value=top3_text, inline=False)
+    embed.add_field(name="🔄 Sim WR", value=sim_text, inline=False)
+    
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+# --- COMANDO: /wrssim ---
+@bot.tree.command(name="wrssim", description="Mostra tutti i Sim WR di un giocatore (visibile solo a te)")
+@app_commands.describe(player="Nome del giocatore")
+async def wrssim_cmd(interaction: discord.Interaction, player: str):
+    await interaction.response.defer(ephemeral=True)
+    
+    target_norm = database_utils.get_main_name(player.strip())
+    sim_channel = bot.get_channel(config.SIM_WR_CHANNEL_ID)
+    
+    wrs_found = []
+    
+    if sim_channel:
+        # Legge gli ultimi 500 messaggi del canale Sim WR
+        async for message in sim_channel.history(limit=500):
+            if not message.content: continue
+            for line in message.content.split('\n'):
+                clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").strip()
+                
+                # Cerca una riga formattata come "build : tempo - giocatore"
+                if "-" in clean_line and ":" in clean_line:
+                    parts = clean_line.split('-')
+                    player_part = parts[-1].strip() # La parte a destra del trattino
+                    
+                    # Estrae tutti i giocatori (nel caso siano separati da "/")
+                    sim_players = [p.strip() for p in player_part.split('/')]
+                    sim_players_norm = [database_utils.get_main_name(p) for p in sim_players]
+                    
+                    if target_norm in sim_players_norm:
+                        original_line = line.replace("*", "").replace("_", "").replace(">", "").strip()
+                        wrs_found.append(f"• {original_line} [[Link]]({message.jump_url})")
+
+    if not wrs_found:
+        await interaction.followup.send(f"❌ Nessun Sim WR trovato per **{player.title()}**.", ephemeral=True)
+        return
+        
+    embed = discord.Embed(
+        title=f"🔄 Sim WR di {player.title()} ({len(wrs_found)})", 
+        color=discord.Color.green()
+    )
+    
+    description = "\n".join(wrs_found)
+    # Evita il blocco di Discord se la lista è esageratamente lunga (> 4000 caratteri)
+    if len(description) > 4000:
+        description = description[:3900] + "\n... *(troppi risultati per un solo messaggio)*"
+        
+    embed.description = description
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
 @bot.event
 async def on_ready():
     print(f"✅ Bot {bot.user} avviato con successo e collegato al Cloud!")
