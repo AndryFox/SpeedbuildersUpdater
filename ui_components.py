@@ -168,7 +168,16 @@ class EditWRView(discord.ui.View):
     @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, emoji="✏️")
     async def edit_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         attachment = interaction.message.attachments[0] if interaction.message.attachments else None
-        modal = WRModal(self.bot, attachment, original_view=self, original_message=interaction.message, is_edit=True)
+        modal = WRModal(
+            self.bot, 
+            attachment, 
+            original_view=self, 
+            original_message=interaction.message, 
+            is_edit=True,
+            def_b=self.def_b,
+            def_p=self.def_p,
+            def_t=self.def_t
+        )
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️")
@@ -263,12 +272,20 @@ class WRModal(Modal):
 
         async with database_utils.pool.acquire() as conn:
             if self.is_edit:
-                try: old_t = float(self.original_view.def_t)
-                except ValueError: old_t = 0.0
-                await conn.execute(
-                    "DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3",
-                    self.original_view.def_b.strip(), self.original_view.def_p.strip(), old_t
-                )
+            channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
+            try:
+                msg_to_edit = await channel.fetch_message(self.original_view.update_msg_id)
+                await msg_to_edit.edit(content=testo_record)
+            except: pass
+            
+            # --- CORREZIONE: Aggiorniamo la memoria del bottone per non creare duplicati ai successivi Edit! ---
+            self.original_view.def_b = build_key
+            self.original_view.def_p = current_player
+            self.original_view.def_t = str(new_time)
+            
+            new_content_msg = re.sub(r'\n\|\|#WR#.*\|\|', '', self.original_message.content)
+            await self.original_message.edit(content=new_content_msg, view=self.original_view)
+            await interaction.followup.send("✅ Modifica salvata!", ephemeral=True)
 
             row = await conn.fetchrow("SELECT build_name FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) LIMIT 1", build_key)
             if row: 
