@@ -285,12 +285,13 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
                     
                     import re
                     for p in sim_players:
+                        # Rimuove (Retime ...) e [Link ...]
                         clean_p = re.sub(r'\(.*?\)', '', p)
-                        clean_p = re.sub(r'\[.*?\]', '', clean_p).strip()
+                        clean_p = re.sub(r'\[.*?\]', '', clean_p)
+                        # Rimuove i backslash (\) usati per bloccare la formattazione di Discord
+                        clean_p = clean_p.replace("\\", "").strip()
+                        
                         sim_players_norm.append(database_utils.get_main_name(clean_p))
-                    
-                    if target_norm.lower() in [name.lower() for name in sim_players_norm]:
-                        wrs_found.append(f"• {raw_line} - [🔗 Link]({message.jump_url})")
 
     if not wrs_found:
         await interaction.followup.send(f"❌ Nessun Sim WR trovato per **{player.title()}**.", ephemeral=True)
