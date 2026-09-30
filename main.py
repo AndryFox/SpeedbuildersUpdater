@@ -188,7 +188,7 @@ async def player_autocomplete(interaction: discord.Interaction, current: str) ->
 # --- COMANDO: /buildtimes ---
 @bot.tree.command(name="buildtimes", description="Mostra la Top 3 e il Sim WR di una build (visibile solo a te)")
 @app_commands.describe(build="Nome della build da cercare")
-@app_commands.autocomplete(build=build_autocomplete) # <--- AGGIUNTO L'AUTOCOMPLETE
+@app_commands.autocomplete(build=build_autocomplete)
 async def buildtimes_cmd(interaction: discord.Interaction, build: str):
     await interaction.response.defer(ephemeral=True)
     
@@ -237,10 +237,13 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
         async for message in sim_channel.history(limit=500):
             if not message.content: continue
             for line in message.content.split('\n'):
-                clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").replace("`", "").strip()
-                if clean_line.startswith(f"{build_clean}:") or clean_line.startswith(f"{build_clean} :"):
-                    original_line = line.replace("*", "").replace("_", "").replace(">", "").replace("`", "").strip()
-                    sim_text = f"**{original_line}**\n[🔗 Vai al messaggio originale]({message.jump_url})"
+                # Manteniamo gli _ nella stringa grezza per la visualizzazione
+                raw_line = line.replace("*", "").replace(">", "").replace("`", "").strip()
+                # Creiamo una versione senza _ SOLO per fare il controllo iniziale della build
+                build_check_line = raw_line.lower().replace("_", "")
+                
+                if build_check_line.startswith(f"{build_clean}:") or build_check_line.startswith(f"{build_clean} :"):
+                    sim_text = f"**{raw_line}**\n[🔗 Vai al messaggio originale]({message.jump_url})"
                     found = True
                     break
             if found: break
@@ -256,7 +259,7 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
 # --- COMANDO: /wrssim ---
 @bot.tree.command(name="wrssim", description="Mostra tutti i Sim WR di un giocatore (visibile solo a te)")
 @app_commands.describe(player="Nome del giocatore")
-@app_commands.autocomplete(player=player_autocomplete) # <--- AGGIUNTO L'AUTOCOMPLETE
+@app_commands.autocomplete(player=player_autocomplete)
 async def wrssim_cmd(interaction: discord.Interaction, player: str):
     await interaction.response.defer(ephemeral=True)
     
@@ -269,10 +272,12 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
         async for message in sim_channel.history(limit=500):
             if not message.content: continue
             for line in message.content.split('\n'):
-                clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").replace("`", "").strip()
+                # NON facciamo più il .replace("_", "") per preservare i nomi come _Ilusion_
+                raw_line = line.replace("*", "").replace(">", "").replace("`", "").strip()
+                clean_line = raw_line.lower()
                 
                 if "-" in clean_line and ":" in clean_line:
-                    parts = clean_line.split('-')
+                    parts = raw_line.split('-')
                     player_part = parts[-1].strip()
                     
                     sim_players = [p.strip() for p in player_part.split('/')]
@@ -284,10 +289,8 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
                         clean_p = re.sub(r'\[.*?\]', '', clean_p).strip()
                         sim_players_norm.append(database_utils.get_main_name(clean_p))
                     
-                    # Confrontiamo tutto in minuscolo per ignorare il Case-Sensitive
                     if target_norm.lower() in [name.lower() for name in sim_players_norm]:
-                        original_line = line.replace("*", "").replace("_", "").replace(">", "").replace("`", "").strip()
-                        wrs_found.append(f"• {original_line} - [🔗 Link]({message.jump_url})")
+                        wrs_found.append(f"• {raw_line} - [🔗 Link]({message.jump_url})")
 
     if not wrs_found:
         await interaction.followup.send(f"❌ Nessun Sim WR trovato per **{player.title()}**.", ephemeral=True)
