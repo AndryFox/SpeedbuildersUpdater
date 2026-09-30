@@ -269,54 +269,75 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
     target_cmp = target_norm.lower().replace("_", "").replace("\\", "").strip()
     
     sim_channel = bot.get_channel(config.SIM_WR_CHANNEL_ID)
-    wrs_found = []
+    records = []
     
     if sim_channel:
         async for message in sim_channel.history(limit=500):
             if not message.content: continue
             for line in message.content.split('\n'):
-                raw_line = line.replace("*", "").replace(">", "").replace("`", "").strip()
+                # Pulizia base (conserviamo i backtick originali per ora)
+                raw_line = line.replace("*", "").replace(">", "").strip()
                 clean_line = raw_line.lower()
                 
                 if "-" in clean_line and ":" in clean_line:
-                    parts = raw_line.split('-')
-                    player_part = parts[-1].strip()
+                    try:
+                        # Separiamo la build+tempo dai giocatori
+                        build_part, player_part = raw_line.rsplit('-', 1)
+                        build_split = build_part.split(':')
+                        build_name = build_split[0].strip()
+                        time_val = build_split[1].strip().replace("s", "").replace("S", "")
+                    except:
+                        continue
                     
                     sim_players = [p.strip() for p in player_part.split('/')]
-                    sim_players_cmp = []
                     
                     import re
                     for p in sim_players:
-                        clean_p = re.sub(r'\(.*?\)', '', p)
+                        # Rimuoviamo eventuali backtick, retime e link per capire chi è il giocatore
+                        clean_p = re.sub(r'`?\(.*?\)`?', '', p)
                         clean_p = re.sub(r'\[.*?\]', '', clean_p).replace("\\", "").strip()
                         
                         main_p = database_utils.get_main_name(clean_p)
-                        # Creiamo la versione "super-pulita" anche per i nomi trovati nel canale
                         main_p_cmp = main_p.lower().replace("_", "").replace("\\", "").strip()
-                        sim_players_cmp.append(main_p_cmp)
-                    
-                    # Confrontiamo i nomi ignorando underscore e formattazioni
-                    if target_cmp in sim_players_cmp:
-                        wrs_found.append(f"• {raw_line} - [🔗 Link]({message.jump_url})")
-
-    # Escapiamo gli underscore per evitare che Discord li converta in corsivo nella risposta
-    safe_player = player.title().replace("_", "\\_")
-
-    if not wrs_found:
-        await interaction.followup.send(f"❌ Nessun Sim WR trovato per **{safe_player}**.", ephemeral=True)
-        return
-        
-    embed = discord.Embed(
-        title=f"🔄 Sim WR di {safe_player} ({len(wrs_found)})", 
-        color=discord.Color.green()
-    )
+                        
+                        if target_cmp == main_p_cmp:
+                            # Se troviamo il giocatore, estraiamo il retime originale
+                            retime_match = re.search(r'\((retime.*?)\)', p, re.IGNORECASE)
+                            # Forziamo i backtick (`) attorno al retime
+                            retime_str = f" `{retime_match.group(0)}`" if retime_match else ""
+                            
+                            # Escapiamo gli underscore nel nome per la chat di Discord
+                            safe_name = clean_p.replace("_", "\\_")
+                            
+                            # Formattiamo la stringa identica a /wrs, ma con l'aggiunta del nome e del retime
+                            records.append(f"▸ Build: **{build_name}** ⸻ `{time_val}s` - {safe_name}{retime_str} [🔗]({message.jump_url})")
+                            break # Trovato, passiamo alla prossima riga
+                            
+    count = len(records)
     
-    description = "\n".join(wrs_found)
-    if len(description) > 4000:
-        description = description[:3900] + "\n... *(troppi risultati per un solo messaggio)*"
+    if count > 0:
+        # Recuperiamo l'avatar da Minotar e prepariamo il nome pulito
+        avatar_url = f"https://minotar.net/helm/{target_norm}/256.png"
+        nome_estetico = database_utils.DISPLAY_NAMES_CACHE.get(target_norm, target_norm)
         
-    embed.description = description
-    await interaction.followup.send(embed=embed, ephemeral=True)
+        # Creiamo l'Embed nello stesso stile grafico di /wrs
+        embed = discord.Embed(color=discord.Color.green())
+        embed.set_author(name=f"{nome_estetico}'s Sim WRs ({count})", icon_url=avatar_url)
+        embed.set_thumbnail(url=avatar_url)
+        
+        lista_formattata = "\n".join(records)
+        if len(lista_formattata) > 3900: 
+            lista_formattata = lista_formattata[:3900] + "\n\n*... and more (text limit reached)!*"
+            
+        embed.description = lista_formattata
+        
+        icon_url = bot.user.avatar.url if bot.user.avatar else None
+        embed.set_footer(text="FearGames Speedbuilders", icon_url=icon_url)
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    else:
+        safe_player = player.title().replace("_", "\\_")
+        await interaction.followup.send(f"📉 **{safe_player}** is not in the rankings yet or has no Sim WRs at the moment.", ephemeral=True)
 
 @bot.event
 async def on_ready():
