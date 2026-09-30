@@ -263,11 +263,10 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
 async def wrssim_cmd(interaction: discord.Interaction, player: str):
     await interaction.response.defer(ephemeral=True)
     
-    target_norm = database_utils.get_main_name(player.strip())
+    # Assicurati di usare database_utils o rankings in base a dove hai messo il file
+    target_norm = database_utils.get_main_name(player.strip()) 
     
-    # Creiamo una versione "super-pulita" del nome target (senza trattini bassi o backslash)
     target_cmp = target_norm.lower().replace("_", "").replace("\\", "").strip()
-    
     sim_channel = bot.get_channel(config.SIM_WR_CHANNEL_ID)
     records = []
     
@@ -275,17 +274,28 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
         async for message in sim_channel.history(limit=500):
             if not message.content: continue
             for line in message.content.split('\n'):
-                # Pulizia base (conserviamo i backtick originali per ora)
                 raw_line = line.replace("*", "").replace(">", "").strip()
-                clean_line = raw_line.lower()
                 
-                if "-" in clean_line and ":" in clean_line:
+                # Se ci sono i due punti, analizziamo la riga
+                if ":" in raw_line:
                     try:
-                        # Separiamo la build+tempo dai giocatori
-                        build_part, player_part = raw_line.rsplit('-', 1)
-                        build_split = build_part.split(':')
-                        build_name = build_split[0].strip()
-                        time_val = build_split[1].strip().replace("s", "").replace("S", "")
+                        # Dividiamo il nome della build dal resto della frase
+                        parts = raw_line.split(':', 1)
+                        build_name = parts[0].strip()
+                        rest_of_line = parts[1].strip()
+                        
+                        if not rest_of_line:
+                            continue
+                            
+                        # Controlliamo se c'è un trattino per il tempo globale
+                        if "-" in rest_of_line:
+                            time_part, player_part = rest_of_line.split('-', 1)
+                            time_val = time_part.strip().lower().replace("s", "")
+                        else:
+                            # Caso "Recinto": nessun tempo globale, si passa subito ai giocatori
+                            time_val = ""
+                            player_part = rest_of_line
+                            
                     except:
                         continue
                     
@@ -293,34 +303,37 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
                     
                     import re
                     for p in sim_players:
-                        # Rimuoviamo eventuali backtick, retime e link per capire chi è il giocatore
                         clean_p = re.sub(r'`?\(.*?\)`?', '', p)
-                        clean_p = re.sub(r'\[.*?\]', '', clean_p).replace("\\", "").strip()
+                        clean_p = re.sub(r'\[.*?\]', '', clean_p)
+                        # Rimuoviamo anche eventuali backtick attaccati al nome
+                        clean_p = clean_p.replace("\\", "").replace("`", "").strip()
                         
-                        main_p = database_utils.get_main_name(clean_p)
+                        main_p = database_utils.get_main_name(clean_p) 
                         main_p_cmp = main_p.lower().replace("_", "").replace("\\", "").strip()
                         
                         if target_cmp == main_p_cmp:
-                            # Se troviamo il giocatore, estraiamo il retime originale
                             retime_match = re.search(r'\((retime.*?)\)', p, re.IGNORECASE)
-                            # Forziamo i backtick (`) attorno al retime
                             retime_str = f" `{retime_match.group(0)}`" if retime_match else ""
                             
-                            # Escapiamo gli underscore nel nome per la chat di Discord
-                            safe_name = clean_p.replace("_", "\\_")
+                            # Se non c'era il tempo base (es. Recinto), lo prendiamo leggendo il Retime
+                            display_time = time_val
+                            if not display_time and retime_match:
+                                num_match = re.search(r'[\d\.]+', retime_match.group(1))
+                                if num_match:
+                                    display_time = num_match.group(0)
+                            if not display_time:
+                                display_time = "?"
                             
-                            # Formattiamo la stringa identica a /wrs, ma con l'aggiunta del nome e del retime
-                            records.append(f"▸ Build: **{build_name}** ⸻ `{time_val}s` - {safe_name}{retime_str} [🔗]({message.jump_url})")
-                            break # Trovato, passiamo alla prossima riga
+                            safe_name = clean_p.replace("_", "\\_")
+                            records.append(f"▸ Build: **{build_name}** ⸻ `{display_time}s` - {safe_name}{retime_str} [🔗]({message.jump_url})")
+                            break
                             
     count = len(records)
     
     if count > 0:
-        # Recuperiamo l'avatar da Minotar e prepariamo il nome pulito
         avatar_url = f"https://minotar.net/helm/{target_norm}/256.png"
-        nome_estetico = rankings.DISPLAY_NAMES_CACHE.get(target_norm, target_norm)
+        nome_estetico = rankings.DISPLAY_NAMES_CACHE.get(target_norm, target_norm) 
         
-        # Creiamo l'Embed nello stesso stile grafico di /wrs
         embed = discord.Embed(color=discord.Color.green())
         embed.set_author(name=f"{nome_estetico}'s Sim WRs ({count})", icon_url=avatar_url)
         embed.set_thumbnail(url=avatar_url)
