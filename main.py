@@ -318,7 +318,7 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
     if count > 0:
         # Recuperiamo l'avatar da Minotar e prepariamo il nome pulito
         avatar_url = f"https://minotar.net/helm/{target_norm}/256.png"
-        nome_estetico = database_utils.DISPLAY_NAMES_CACHE.get(target_norm, target_norm)
+        nome_estetico = rankings.DISPLAY_NAMES_CACHE.get(target_norm, target_norm)
         
         # Creiamo l'Embed nello stesso stile grafico di /wrs
         embed = discord.Embed(color=discord.Color.green())
