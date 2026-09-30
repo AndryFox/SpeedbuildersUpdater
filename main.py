@@ -158,15 +158,32 @@ async def build_autocomplete(interaction: discord.Interaction, current: str) -> 
         return [app_commands.Choice(name=row['build_name'], value=row['build_name']) for row in rows]
 
 async def player_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-    # Suggerisce i nomi dei giocatori presi dal database
+    current_lower = current.lower()
+    
+    # 1. Raccogliamo i giocatori dal database
     async with database_utils.pool.acquire() as conn:
-        if not current:
-            rows = await conn.fetch("SELECT DISTINCT player_name FROM WorldRecords ORDER BY player_name LIMIT 25")
-        else:
-            rows = await conn.fetch("SELECT DISTINCT player_name FROM WorldRecords WHERE player_name ILIKE $1 ORDER BY player_name LIMIT 25", f"%{current}%")
+        rows = await conn.fetch("SELECT DISTINCT player_name FROM WorldRecords")
+    
+    # 2. Salviamo SOLO i nomi principali (convertendo in automatico tutti i vecchi nick)
+    main_names = set()
+    for row in rows:
+        main_names.add(database_utils.get_main_name(row['player_name']))
+    
+    # Aggiungiamo anche i nomi principali direttamente dalla RAM degli alias per sicurezza
+    for new_name in database_utils.ALIASES_CACHE.values():
+        main_names.add(new_name)
+        
+    # 3. Riduciamo i risultati man mano che scrivi
+    choices = []
+    for name in main_names:
+        if current_lower and current_lower not in name.lower():
+            continue
+        choices.append(app_commands.Choice(name=name, value=name))
             
-        return [app_commands.Choice(name=row['player_name'], value=row['player_name']) for row in rows]
-
+    # 4. Ordiniamo in ordine alfabetico e limitiamo a 25 (il massimo consentito da Discord)
+    choices = sorted(choices, key=lambda x: x.name.lower())
+    
+    return choices[:25]
 
 # --- COMANDO: /buildtimes ---
 @bot.tree.command(name="buildtimes", description="Mostra la Top 3 e il Sim WR di una build (visibile solo a te)")
