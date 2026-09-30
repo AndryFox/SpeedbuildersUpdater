@@ -144,7 +144,6 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
 @bot.tree.command(name="buildtimes", description="Mostra la Top 3 e il Sim WR di una build (visibile solo a te)")
 @app_commands.describe(build="Nome della build da cercare")
 async def buildtimes_cmd(interaction: discord.Interaction, build: str):
-    # Risponde in modo effimero (invisibile agli altri)
     await interaction.response.defer(ephemeral=True)
     
     # 1. Trova la Top 3 dal Database (WR Ufficiali)
@@ -161,7 +160,6 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
     if not rows:
         top3_text = "Nessun record ufficiale trovato."
     else:
-        # Raggruppa i tempi migliori per giocatore
         best_times = {}
         for row in rows:
             p_name = row['player_name']
@@ -170,7 +168,6 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
             if norm_name not in best_times or t_val < best_times[norm_name]:
                 best_times[norm_name] = t_val
         
-        # Raggruppa i giocatori per tempo (in caso di parità)
         time_groups = {}
         for p, t in best_times.items():
             if t not in time_groups: time_groups[t] = []
@@ -181,7 +178,6 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
         medals = ["🥇 1st", "🥈 2nd", "🥉 3rd"]
         for i in range(min(3, len(sorted_times))):
             t = sorted_times[i]
-            # Mette l'iniziale maiuscola ai nomi per estetica
             players = " / ".join([p.title() for p in time_groups[t]])
             top3_text += f"{medals[i]}: **{players}** ({t}s)\n"
 
@@ -195,10 +191,10 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
         async for message in sim_channel.history(limit=500):
             if not message.content: continue
             for line in message.content.split('\n'):
-                # Pulisce la riga da grassetti e corsivi per leggerla bene
-                clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").strip()
+                # Pulizia potenziata rimuovendo anche i backtick (`)
+                clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").replace("`", "").strip()
                 if clean_line.startswith(f"{build_clean}:") or clean_line.startswith(f"{build_clean} :"):
-                    original_line = line.replace("*", "").replace("_", "").replace(">", "").strip()
+                    original_line = line.replace("*", "").replace("_", "").replace(">", "").replace("`", "").strip()
                     sim_text = f"**{original_line}**\n[🔗 Vai al messaggio originale]({message.jump_url})"
                     found = True
                     break
@@ -224,24 +220,28 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
     wrs_found = []
     
     if sim_channel:
-        # Legge gli ultimi 500 messaggi del canale Sim WR
         async for message in sim_channel.history(limit=500):
             if not message.content: continue
             for line in message.content.split('\n'):
-                clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").strip()
+                clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").replace("`", "").strip()
                 
-                # Cerca una riga formattata come "build : tempo - giocatore"
                 if "-" in clean_line and ":" in clean_line:
                     parts = clean_line.split('-')
-                    player_part = parts[-1].strip() # La parte a destra del trattino
+                    player_part = parts[-1].strip()
                     
-                    # Estrae tutti i giocatori (nel caso siano separati da "/")
                     sim_players = [p.strip() for p in player_part.split('/')]
-                    sim_players_norm = [database_utils.get_main_name(p) for p in sim_players]
+                    sim_players_norm = []
+                    
+                    import re
+                    for p in sim_players:
+                        # Rimuove eventuali scritte (Retime X.X) per trovare il VERO nome del giocatore
+                        clean_p = re.sub(r'\(.*?\)', '', p)
+                        clean_p = re.sub(r'\[.*?\]', '', clean_p).strip()
+                        sim_players_norm.append(database_utils.get_main_name(clean_p))
                     
                     if target_norm in sim_players_norm:
-                        original_line = line.replace("*", "").replace("_", "").replace(">", "").strip()
-                        wrs_found.append(f"• {original_line} [[Link]]({message.jump_url})")
+                        original_line = line.replace("*", "").replace("_", "").replace(">", "").replace("`", "").strip()
+                        wrs_found.append(f"• {original_line} - [🔗 Link]({message.jump_url})")
 
     if not wrs_found:
         await interaction.followup.send(f"❌ Nessun Sim WR trovato per **{player.title()}**.", ephemeral=True)
@@ -253,7 +253,6 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
     )
     
     description = "\n".join(wrs_found)
-    # Evita il blocco di Discord se la lista è esageratamente lunga (> 4000 caratteri)
     if len(description) > 4000:
         description = description[:3900] + "\n... *(troppi risultati per un solo messaggio)*"
         
