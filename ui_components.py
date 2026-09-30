@@ -271,22 +271,16 @@ class WRModal(Modal):
         except ValueError: new_time = 0.0
 
         async with database_utils.pool.acquire() as conn:
+            # 1. Se stiamo modificando, eliminiamo prima il record VECCHIO
             if self.is_edit:
-            channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
-            try:
-                msg_to_edit = await channel.fetch_message(self.original_view.update_msg_id)
-                await msg_to_edit.edit(content=testo_record)
-            except: pass
-            
-            # --- CORREZIONE: Aggiorniamo la memoria del bottone per non creare duplicati ai successivi Edit! ---
-            self.original_view.def_b = build_key
-            self.original_view.def_p = current_player
-            self.original_view.def_t = str(new_time)
-            
-            new_content_msg = re.sub(r'\n\|\|#WR#.*\|\|', '', self.original_message.content)
-            await self.original_message.edit(content=new_content_msg, view=self.original_view)
-            await interaction.followup.send("✅ Modifica salvata!", ephemeral=True)
+                try: old_t = float(self.original_view.def_t)
+                except ValueError: old_t = 0.0
+                await conn.execute(
+                    "DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3",
+                    self.original_view.def_b.strip(), self.original_view.def_p.strip(), old_t
+                )
 
+            # 2. Ora prepariamo l'inserimento del record (sia se è nuovo, sia se sostituisce il precedente)
             row = await conn.fetchrow("SELECT build_name FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) LIMIT 1", build_key)
             if row: 
                 build_key = row['build_name']
@@ -310,6 +304,7 @@ class WRModal(Modal):
             for p in players_to_check:
                 old_counts[p] = await get_wr_count(self.bot, p)
 
+            # Inseriamo il record (aggiornato o nuovo)
             await conn.execute("INSERT INTO WorldRecords (build_name, player_name, time) VALUES ($1, $2, $3)", build_key, current_player, new_time)
             
             new_counts = {}
@@ -364,12 +359,7 @@ class WRModal(Modal):
                     jump_url = f"https://discord.com/channels/{interaction.guild_id}/{config.WR_CHANNEL_ID}/{new_msg.id}"
                     await conn.execute("INSERT INTO BuildMessages (build_name, message_id) VALUES ($1, $2)", build_key, new_msg.id)
 
-        # INSERISCI QUESTO: Prepariamo e inviamo il log
-        action = "EDIT_WR" if self.is_edit else "ACCEPT_WR"
-        dettagli = f"Nuovo tempo: {new_time}"
-        if self.is_edit:
-            dettagli += f" (Vecchio tempo era: {self.original_view.def_t})"
-        
+        # 3. INTERFACCIA E LOG FINALI
         if self.is_edit:
             channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
             try:
@@ -377,9 +367,14 @@ class WRModal(Modal):
                 await msg_to_edit.edit(content=testo_record)
             except: pass
             
+            # Aggiorniamo la memoria della view del bottone per futuri edit
+            self.original_view.def_b = build_key
+            self.original_view.def_p = current_player
+            self.original_view.def_t = str(new_time)
+            
             new_content_msg = re.sub(r'\n\|\|#WR#.*\|\|', '', self.original_message.content)
             await self.original_message.edit(content=new_content_msg, view=self.original_view)
-            await interaction.followup.send("✅ Modifica salvata!", ephemeral=True)
+            await interaction.followup.send("✅ Modifica salvata con successo e database aggiornato!", ephemeral=True)
         else:
             channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
             file_da_inviare = await self.attachment.to_file()
