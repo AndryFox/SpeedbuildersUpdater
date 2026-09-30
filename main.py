@@ -313,7 +313,8 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
                         
                         if target_cmp == main_p_cmp:
                             retime_match = re.search(r'\((retime.*?)\)', p, re.IGNORECASE)
-                            retime_str = f" `{retime_match.group(0)}`" if retime_match else ""
+                            # Aggiungiamo i ** prima e dopo per fare il grassetto insieme agli apici
+                            retime_str = f" **`{retime_match.group(0)}`**" if retime_match else ""
                             
                             # Se non c'era il tempo base (es. Recinto), lo prendiamo leggendo il Retime
                             display_time = time_val
@@ -325,7 +326,9 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
                                 display_time = "?"
                             
                             safe_name = clean_p.replace("_", "\\_")
-                            records.append(f"▸ Build: **{build_name}** ⸻ `{display_time}s` - {safe_name}{retime_str} [🔗]({message.jump_url})")
+                            
+                            # Rimossa la parte del link [🔗] dalla formattazione finale
+                            records.append(f"▸ Build: **{build_name}** ⸻ `{display_time}s` - {safe_name}{retime_str}")
                             break
                             
     count = len(records)
