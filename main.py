@@ -264,15 +264,17 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
     await interaction.response.defer(ephemeral=True)
     
     target_norm = database_utils.get_main_name(player.strip())
-    sim_channel = bot.get_channel(config.SIM_WR_CHANNEL_ID)
     
+    # Creiamo una versione "super-pulita" del nome target (senza trattini bassi o backslash)
+    target_cmp = target_norm.lower().replace("_", "").replace("\\", "").strip()
+    
+    sim_channel = bot.get_channel(config.SIM_WR_CHANNEL_ID)
     wrs_found = []
     
     if sim_channel:
         async for message in sim_channel.history(limit=500):
             if not message.content: continue
             for line in message.content.split('\n'):
-                # NON facciamo più il .replace("_", "") per preservare i nomi come _Ilusion_
                 raw_line = line.replace("*", "").replace(">", "").replace("`", "").strip()
                 clean_line = raw_line.lower()
                 
@@ -281,24 +283,31 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
                     player_part = parts[-1].strip()
                     
                     sim_players = [p.strip() for p in player_part.split('/')]
-                    sim_players_norm = []
+                    sim_players_cmp = []
                     
                     import re
                     for p in sim_players:
-                        # Rimuove (Retime ...) e [Link ...]
                         clean_p = re.sub(r'\(.*?\)', '', p)
-                        clean_p = re.sub(r'\[.*?\]', '', clean_p)
-                        # Rimuove i backslash (\) usati per bloccare la formattazione di Discord
-                        clean_p = clean_p.replace("\\", "").strip()
+                        clean_p = re.sub(r'\[.*?\]', '', clean_p).replace("\\", "").strip()
                         
-                        sim_players_norm.append(database_utils.get_main_name(clean_p))
+                        main_p = database_utils.get_main_name(clean_p)
+                        # Creiamo la versione "super-pulita" anche per i nomi trovati nel canale
+                        main_p_cmp = main_p.lower().replace("_", "").replace("\\", "").strip()
+                        sim_players_cmp.append(main_p_cmp)
+                    
+                    # Confrontiamo i nomi ignorando underscore e formattazioni
+                    if target_cmp in sim_players_cmp:
+                        wrs_found.append(f"• {raw_line} - [🔗 Link]({message.jump_url})")
+
+    # Escapiamo gli underscore per evitare che Discord li converta in corsivo nella risposta
+    safe_player = player.title().replace("_", "\\_")
 
     if not wrs_found:
-        await interaction.followup.send(f"❌ Nessun Sim WR trovato per **{player.title()}**.", ephemeral=True)
+        await interaction.followup.send(f"❌ Nessun Sim WR trovato per **{safe_player}**.", ephemeral=True)
         return
         
     embed = discord.Embed(
-        title=f"🔄 Sim WR di {player.title()} ({len(wrs_found)})", 
+        title=f"🔄 Sim WR di {safe_player} ({len(wrs_found)})", 
         color=discord.Color.green()
     )
     
