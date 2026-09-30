@@ -268,8 +268,7 @@ def setup_rankings_commands(bot):
                 
         choices = sorted(choices, key=lambda x: x.name.lower())
         return choices[:25]
-
-
+    
     # --- COMANDO 1: /wrs ---
     @bot.tree.command(name="wrs", description="Check all WRs and times of a player (visible only to you)")
     @app_commands.describe(player="The name of the player to search")
@@ -494,52 +493,3 @@ def setup_rankings_commands(bot):
         embed.set_footer(text="FearGames Speedbuilders", icon_url=icon_url)
         
         await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @bot.tree.command(name="wrs", description="Check all WRs and times of a player (visible only to you)")
-    @app_commands.describe(player="The name of the player to search")
-    @app_commands.autocomplete(player=player_autocomplete)
-    async def check_wrs(interaction: discord.Interaction, player: str):
-        if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
-            return await interaction.response.send_message(f"⚠️ This command can only be used in <#{config.SUBMISSION_CHANNEL_ID}>.", ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
-        
-        player_norm = get_main_name(player.replace("\\", ""))
-        records = []
-        
-        async with database_utils.pool.acquire() as conn:
-            query = """
-                SELECT r1.build_name, r1.time, r1.player_name
-                FROM WorldRecords r1
-                WHERE r1.time = (SELECT MIN(time) FROM WorldRecords r2 WHERE LOWER(r1.build_name) = LOWER(r2.build_name))
-                ORDER BY LOWER(r1.build_name) ASC
-            """
-            rows = await conn.fetch(query)
-            for row in rows:
-                build_name = row['build_name']
-                time_val = row['time']
-                player_db = row['player_name']
-                
-                if get_main_name(player_db) == player_norm:
-                    records.append(f"▸ Build: **{build_name}** ⸻ `{time_val}s`")
-                        
-        count = len(records)
-        
-        if count > 0:
-            ruolo = get_role_tag(count)
-            nome_estetico = DISPLAY_NAMES_CACHE.get(player_norm, player)
-            avatar_url = f"https://minotar.net/helm/{player_norm}/256.png"
-            
-            embed = discord.Embed(description=f"**Current Rank:** {ruolo}\n\n", color=discord.Color.gold())
-            embed.set_author(name=f"{nome_estetico}'s World Records ({count})", icon_url=avatar_url)
-            embed.set_thumbnail(url=avatar_url)
-            
-            lista_formattata = "\n".join(records)
-            if len(lista_formattata) > 3900: 
-                lista_formattata = lista_formattata[:3900] + "\n\n*... and more (text limit reached)!*"
-            embed.description += lista_formattata
-            
-            icon_url = bot.user.avatar.url if bot.user.avatar else None
-            embed.set_footer(text="FearGames Speedbuilders", icon_url=icon_url)
-            await interaction.followup.send(embed=embed)
-        else:
-            await interaction.followup.send(f"📉 **{player}** is not in the rankings yet or has no WRs at the moment.")
