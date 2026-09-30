@@ -140,9 +140,38 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
     else:
         await interaction.response.send_message("❌ Ops! Si è verificato un errore interno. L'amministratore è stato avvisato.", ephemeral=True)
 
+from discord import app_commands
+import discord
+import database_utils
+
+# --- FUNZIONI DI AUTOCOMPLETAMENTO ---
+async def build_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    # Suggerisce i nomi delle build presi dal database
+    async with database_utils.pool.acquire() as conn:
+        if not current:
+            # Se la casella è vuota, mostra le prime 25 build in ordine alfabetico
+            rows = await conn.fetch("SELECT DISTINCT build_name FROM WorldRecords ORDER BY build_name LIMIT 25")
+        else:
+            # Cerca le build che contengono le lettere digitate (ILIKE non è case-sensitive)
+            rows = await conn.fetch("SELECT DISTINCT build_name FROM WorldRecords WHERE build_name ILIKE $1 ORDER BY build_name LIMIT 25", f"%{current}%")
+        
+        return [app_commands.Choice(name=row['build_name'], value=row['build_name']) for row in rows]
+
+async def player_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    # Suggerisce i nomi dei giocatori presi dal database
+    async with database_utils.pool.acquire() as conn:
+        if not current:
+            rows = await conn.fetch("SELECT DISTINCT player_name FROM WorldRecords ORDER BY player_name LIMIT 25")
+        else:
+            rows = await conn.fetch("SELECT DISTINCT player_name FROM WorldRecords WHERE player_name ILIKE $1 ORDER BY player_name LIMIT 25", f"%{current}%")
+            
+        return [app_commands.Choice(name=row['player_name'], value=row['player_name']) for row in rows]
+
+
 # --- COMANDO: /buildtimes ---
 @bot.tree.command(name="buildtimes", description="Mostra la Top 3 e il Sim WR di una build (visibile solo a te)")
 @app_commands.describe(build="Nome della build da cercare")
+@app_commands.autocomplete(build=build_autocomplete) # <--- AGGIUNTO L'AUTOCOMPLETE
 async def buildtimes_cmd(interaction: discord.Interaction, build: str):
     await interaction.response.defer(ephemeral=True)
     
@@ -191,7 +220,6 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
         async for message in sim_channel.history(limit=500):
             if not message.content: continue
             for line in message.content.split('\n'):
-                # Pulizia potenziata rimuovendo anche i backtick (`)
                 clean_line = line.lower().replace("*", "").replace("_", "").replace(">", "").replace("`", "").strip()
                 if clean_line.startswith(f"{build_clean}:") or clean_line.startswith(f"{build_clean} :"):
                     original_line = line.replace("*", "").replace("_", "").replace(">", "").replace("`", "").strip()
@@ -211,6 +239,7 @@ async def buildtimes_cmd(interaction: discord.Interaction, build: str):
 # --- COMANDO: /wrssim ---
 @bot.tree.command(name="wrssim", description="Mostra tutti i Sim WR di un giocatore (visibile solo a te)")
 @app_commands.describe(player="Nome del giocatore")
+@app_commands.autocomplete(player=player_autocomplete) # <--- AGGIUNTO L'AUTOCOMPLETE
 async def wrssim_cmd(interaction: discord.Interaction, player: str):
     await interaction.response.defer(ephemeral=True)
     
@@ -234,7 +263,6 @@ async def wrssim_cmd(interaction: discord.Interaction, player: str):
                     
                     import re
                     for p in sim_players:
-                        # Rimuove eventuali scritte (Retime X.X) per trovare il VERO nome del giocatore
                         clean_p = re.sub(r'\(.*?\)', '', p)
                         clean_p = re.sub(r'\[.*?\]', '', clean_p).strip()
                         sim_players_norm.append(database_utils.get_main_name(clean_p))
