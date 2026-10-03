@@ -476,10 +476,36 @@ def setup_rankings_commands(bot):
                         else:
                             rest_of_line = raw_line
                             
-                        sim_text = f"**{rest_of_line}**"
+                        # Dividiamo il tempo globale dai giocatori
+                        if "-" in rest_of_line:
+                            time_part, players_part = rest_of_line.split("-", 1)
+                            time_str = f"`{time_part.strip()}` - "
+                        else:
+                            players_part = rest_of_line
+                            time_str = ""
+                            
+                        formatted_players = []
+                        for p in players_part.split("/"):
+                            p = p.strip()
+                            
+                            # Cerchiamo se questo giocatore specifico ha un retime
+                            retime_match = re.search(r'(\(retime.*?\))', p, re.IGNORECASE)
+                            if retime_match:
+                                retime_text = f"`{retime_match.group(1)}`"
+                                # Rimuoviamo la scritta del retime dal nome del giocatore
+                                p_name = p.replace(retime_match.group(1), "").strip()
+                            else:
+                                retime_text = ""
+                                p_name = p.strip()
+                                
+                            # Evitiamo il corsivo di Discord sui nomi con underscore
+                            safe_name = p_name.replace("_", "\\_")
+                            formatted_players.append(f"**{safe_name}**{retime_text}")
+                            
+                        # Uniamo di nuovo tutti i giocatori formattati
+                        sim_text = time_str + " / ".join(formatted_players)
                         found = True
                         break
-                if found: break
 
         embed = discord.Embed(title=f"⏱️ Build Stats: {build.title()}", color=discord.Color.blue())
         
