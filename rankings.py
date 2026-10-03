@@ -368,7 +368,8 @@ def setup_rankings_commands(bot):
                             
                             if target_cmp == main_p_cmp:
                                 retime_match = re.search(r'\((retime.*?)\)', p, re.IGNORECASE)
-                                retime_str = f" **`{retime_match.group(0)}`**" if retime_match else ""
+                                # Se c'è il retime, aggiungiamo il trattino spaziatore, il grassetto e gli apici storti
+                                retime_str = f" - **`{retime_match.group(0)}`**" if retime_match else ""
                                 
                                 display_time = time_val
                                 if not display_time and retime_match:
@@ -378,8 +379,8 @@ def setup_rankings_commands(bot):
                                 if not display_time:
                                     display_time = "?"
                                 
-                                safe_name = clean_p.replace("_", "\\_")
-                                records.append(f"▸ Build: **{build_name}** ⸻ `{display_time}s` - {safe_name}{retime_str}")
+                                # Creiamo la riga pulita senza inserire il nome del giocatore (safe_name rimosso)
+                                records.append(f"▸ Build: **{build_name}** ⸻ `{display_time}s`{retime_str}")
                                 break
                                 
         count = len(records)
