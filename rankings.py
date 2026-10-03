@@ -479,7 +479,7 @@ def setup_rankings_commands(bot):
                         # Dividiamo il tempo globale dai giocatori
                         if "-" in rest_of_line:
                             time_part, players_part = rest_of_line.split("-", 1)
-                            time_str = f"`{time_part.strip()}` - "
+                            time_str = f"{time_part.strip()}s - "
                         else:
                             players_part = rest_of_line
                             time_str = ""
