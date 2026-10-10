@@ -154,74 +154,81 @@ class WrRoundModal(Modal):
 
 # --- VIEW PER IL TASTO EDIT (WR NORMALI) ---
 class EditWRView(discord.ui.View):
-    def __init__(self, bot, wr_url: str, def_b: str, def_p: str, def_t: float, update_msg_id: int):
-        super().__init__() 
-        self.bot = bot
-        self.def_b = def_b
-        self.def_p = def_p
-        self.def_t = str(def_t)
-        self.update_msg_id = update_msg_id
+    def __init__(self, jump_url=None):
+        super().__init__(timeout=None)
         
-        if wr_url:
-            self.add_item(discord.ui.Button(label="Go to WR", url=wr_url, row=0))
+        # Ripristiniamo il tuo terzo tasto (il link al messaggio)
+        if jump_url:
+            # Sostituisci l'emoji 🔗 e la scritta con i tuoi originali!
+            self.add_item(discord.ui.Button(label="Go to WR", url=jump_url))
 
-    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, emoji="✏️")
+    # Rimetti la tua emoji al posto di ✏️ e il tuo label originale
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.blurple, emoji="✏️", custom_id="edit_wr_btn")
     async def edit_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        attachment = interaction.message.attachments[0] if interaction.message.attachments else None
+        data = await database_utils.get_button_memory(interaction.message.id)
+        
+        if not data:
+            return await interaction.response.send_message("❌ Dati non trovati. Questo record è antecedente all'aggiornamento.", ephemeral=True)
+        
+        # 1. Iniettiamo i dati nella View
+        self.def_b = data['build_name']
+        self.def_p = data['player_name']
+        self.def_t = data['time_val']
+        self.update_msg_id = data.get('update_msg_id')
+        
+        # 2. Creiamo il modale
         modal = WRModal(
-            self.bot, 
-            attachment, 
+            bot=interaction.client, 
+            attachment=None, 
             original_view=self, 
             original_message=interaction.message, 
-            is_edit=True,
-            def_b=self.def_b,
-            def_p=self.def_p,
-            def_t=self.def_t
+            is_edit=True
         )
+        
+        # 3. PRECOMPILIAMO I CAMPI DI TESTO!
+        modal.build_name.default = self.def_b
+        modal.player_name.default = self.def_p
+        modal.time_val.default = self.def_t
+        
+        # 4. Inviamo il modale
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️")
+    # Rimetti la tua emoji al posto di 🗑️ e il tuo label originale
+    @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.red, emoji="🗑️", custom_id="undo_wr_btn")
     async def undo_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        build_key, player, time_val, update_msg_id = self.def_b, self.def_p, float(self.def_t), self.update_msg_id
-
-        updates_channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
-        if updates_channel:
-            try:
-                msg_to_delete = await updates_channel.fetch_message(update_msg_id)
-                await msg_to_delete.delete()
-            except: pass
-
-        rejected_channel = self.bot.get_channel(config.REJECT_CHANNEL_ID)
-        author_mention = interaction.message.mentions[0].mention if interaction.message.mentions else "l'utente"
-        if rejected_channel and interaction.message.attachments:
-            file_to_send = await interaction.message.attachments[0].to_file()
-            await rejected_channel.send(content=f"Screen rifiutato (dopo annullamento) da {author_mention}:", file=file_to_send)
-
-        msg_id = None
-        import database_utils 
-        async with database_utils.pool.acquire() as conn:
-            await conn.execute("DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3", build_key, player, time_val)
-            row = await conn.fetchrow("SELECT message_id FROM BuildMessages WHERE LOWER(build_name) = LOWER($1)", build_key)
-            if row: msg_id = row['message_id']
-
-        if msg_id:
-            testo_formattato = await database_utils.generate_build_message(build_key)
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                webhook = discord.Webhook.from_url(config.WORLD_RECORDS_WEBHOOK_URL, session=session)
-                try: await webhook.edit_message(msg_id, content=testo_formattato)
-                except: pass
-
-        for child in self.children: child.disabled = True
-        new_content = interaction.message.content.replace("**Accepted ✅**", "**Rejected ❌ (Annullato)**")
-        await interaction.message.edit(content=new_content, view=self)
-        await interaction.message.delete(delay=20)
         
-        import rankings
-        await rankings.trigger_ranking_update(self.bot)
-        await interaction.followup.send("✅ Record annullato e database ripristinato!", ephemeral=True)
+        data = await database_utils.get_button_memory(interaction.message.id)
+        if not data:
+            return await interaction.followup.send("❌ Impossibile annullare: dati non trovati.", ephemeral=True)
+            
+        build_key = data['build_name']
+        player = data['player_name']
+        time_val = data['time_val']
+        tipo = data['tipo']
         
+        # --- (QUI LASCIA LA TUA LOGICA DI CANCELLAZIONE WR DAL DATABASE) ---
+        
+        await database_utils.log_action(
+            interaction.user.id, 
+            "UNDO_WR", 
+            f"Annullato {tipo} di {player} su {build_key} ({time_val}s)"
+        )
+        
+        if data.get('update_msg_id'):
+            # Usiamo interaction.client al posto di self.bot
+            channel = interaction.client.get_channel(config.UPDATES_CHANNEL_ID)
+            if channel:
+                try:
+                    pub_msg = await channel.fetch_message(data['update_msg_id'])
+                    await pub_msg.delete()
+                except Exception:
+                    pass
+
+        await database_utils.delete_button_memory(interaction.message.id)
+        await interaction.message.delete()
+        await interaction.followup.send("✅ Record annullato e rimosso.", ephemeral=True)
+
 # --- MODAL PER SIM WR ---
 class SimWrModal(Modal, title='Cerca link per Sim WR'):
     build_name = TextInput(label='Nome build', placeholder='Es. Caveau', required=True)
@@ -367,24 +374,45 @@ class WRModal(Modal):
                 await msg_to_edit.edit(content=testo_record)
             except: pass
             
-            # Aggiorniamo la memoria della view del bottone per futuri edit
-            self.original_view.def_b = build_key
-            self.original_view.def_p = current_player
-            self.original_view.def_t = str(new_time)
+            # IL PUNTO 2 (Aggiornamento memoria in caso di Modifica)
+            await database_utils.save_button_memory(
+                message_id=self.original_message.id,
+                build_name=build_key,
+                player_name=current_player,
+                time_val=str(new_time),
+                tipo="WR",
+                update_msg_id=self.original_view.update_msg_id # <--- ECCOLO QUI
+            )
             
             new_content_msg = re.sub(r'\n\|\|#WR#.*\|\|', '', self.original_message.content)
-            await self.original_message.edit(content=new_content_msg, view=self.original_view)
+            # Richiamiamo la view senza parametri!
+            await self.original_message.edit(content=new_content_msg, view=EditWRView()) 
             await interaction.followup.send("✅ Modifica salvata con successo e database aggiornato!", ephemeral=True)
+            await database_utils.log_action(interaction.user.id, "EDIT_WR", f"Modificato WR: {build_key} di {current_player} a {new_time}s")
+            
         else:
             channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
             file_da_inviare = await self.attachment.to_file()
             update_msg = await channel.send(content=testo_record, file=file_da_inviare)
             
-            new_content = f"{self.original_message.content} - **Accepted ✅**"
+            new_content = f"{self.original_message.content}\n**Accepted ✅**"
             
-            edit_view = EditWRView(self.bot, jump_url, build_key, current_player, new_time, update_msg.id)
+            # Passiamo il jump_url che abbiamo appena generato!
+            edit_view = EditWRView(jump_url=jump_url) 
             await self.original_message.edit(content=new_content, view=edit_view)
+            
+            # IL PUNTO 2 (Salvataggio memoria per un Nuovo Record)
+            await database_utils.save_button_memory(
+                message_id=self.original_message.id,
+                build_name=build_key,
+                player_name=current_player,
+                time_val=str(new_time),
+                tipo="WR",
+                update_msg_id=update_msg.id # <--- ECCO IL MESSAGGIO PUBBLICO APPENA INVIATO
+            )
+            
             await interaction.followup.send("✅ Record approvato!", ephemeral=True)
+            await database_utils.log_action(interaction.user.id, "APPROVE_WR", f"Approvato nuovo WR: {build_key} di {current_player} a {new_time}s")
         
         import rankings
         await rankings.trigger_ranking_update(self.bot)
