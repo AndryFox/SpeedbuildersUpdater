@@ -149,3 +149,47 @@ async def generate_build_message(build_name: str) -> str:
     else: testo += "> :third_place: - "
         
     return testo
+
+async def log_action(admin_id: int, azione: str, dettagli: str):
+    """Salva un log interno delle azioni dello staff su Supabase."""
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO changelogs (admin_id, azione, dettagli) VALUES ($1, $2, $3)",
+                admin_id, azione, dettagli
+            )
+    except Exception as e:
+        print(f"⚠️ Errore salvataggio log: {e}")
+
+async def save_button_memory(message_id: int, build_name: str, player_name: str, time_val: str, tipo: str, update_msg_id: int = None):
+    """Salva i dati del bottone nel database per sopravvivere ai riavvii."""
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO buttonmemory (message_id, build_name, player_name, time_val, tipo, update_msg_id) 
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (message_id) 
+                DO UPDATE SET build_name = EXCLUDED.build_name, player_name = EXCLUDED.player_name, time_val = EXCLUDED.time_val, update_msg_id = COALESCE(EXCLUDED.update_msg_id, buttonmemory.update_msg_id)
+            """, message_id, build_name, player_name, str(time_val), tipo, update_msg_id)
+    except Exception as e:
+        print(f"⚠️ Errore salvataggio buttonmemory: {e}")
+
+async def get_button_memory(message_id: int):
+    """Recupera i dati di un bottone usando l'ID del messaggio discord."""
+    try:
+        async with pool.acquire() as conn:
+            return await conn.fetchrow(
+                "SELECT build_name, player_name, time_val, tipo, update_msg_id FROM buttonmemory WHERE message_id = $1",
+                message_id
+            )
+    except Exception as e:
+        print(f"⚠️ Errore lettura buttonmemory: {e}")
+        return None
+
+async def delete_button_memory(message_id: int):
+    """Cancella i dati del bottone dal database (es. quando si usa Undo)."""
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM buttonmemory WHERE message_id = $1", message_id)
+    except Exception as e:
+        print(f"⚠️ Errore cancellazione buttonmemory: {e}")
