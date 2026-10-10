@@ -15,6 +15,7 @@ import rankings
 import ui_components
 from tourneys import setup_tourney_commands
 from rankings import setup_rankings_commands
+from ui_components import EditWRView
 
 # Inizializza il bot
 intents = discord.Intents.default()
@@ -86,13 +87,29 @@ async def add_alias(interaction: discord.Interaction, vecchio_nome: str, nuovo_n
     await rankings.trigger_ranking_update(bot)
        
     await interaction.response.send_message(f"✅ Identità unite! Tutti i record passati e futuri di `{vecchio_nome}` apparterranno a **{nuovo_nome}**.", ephemeral=True)
+    await database_utils.log_action(
+        interaction.user.id, 
+        "ADD_ALIAS", 
+        f"Unito vecchio nome '{vecchio_nome}' nel nuovo nome '{nuovo_nome}'"
+    )
 
-async def setup_hook():
+from ui_components import EditWRView # Assicurati di importarla!
+
+# Creiamo la funzione di avvio per il nostro bot
+async def avvio_iniziale():
     await database_utils.init_pool()
-    await database_utils.load_aliases() # AGGIUNGI QUESTA RIGA
+    await database_utils.load_aliases()
+    
+    # Questa riga dice al bot: "Resta in ascolto di questi bottoni per sempre!"
+    bot.add_view(EditWRView())
+    
+    # Se hai aggiunto i custom_id anche a ReviewView, decommenta la riga sotto:
+    # bot.add_view(ui_components.ReviewView())
+    
     print("🗄️ Database e Viste Persistenti inizializzati!")
 
-bot.setup_hook = setup_hook
+# Agganciamo la funzione al bot globale
+bot.setup_hook = avvio_iniziale
 
 import traceback
 
