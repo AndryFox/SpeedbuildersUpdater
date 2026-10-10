@@ -395,7 +395,7 @@ class WRModal(Modal):
             file_da_inviare = await self.attachment.to_file()
             update_msg = await channel.send(content=testo_record, file=file_da_inviare)
             
-            new_content = f"{self.original_message.content}\n**Accepted ✅**"
+            new_content = f"{self.original_message.content} - **Accepted ✅**"
             
             # Passiamo il jump_url che abbiamo appena generato!
             edit_view = EditWRView(jump_url=jump_url) 
