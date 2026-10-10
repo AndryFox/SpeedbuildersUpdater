@@ -1,7 +1,6 @@
 import discord
 from discord import app_commands 
 from discord.ext import commands
-import os
 import re
 import asyncio
 import aiohttp
@@ -16,6 +15,21 @@ import ui_components
 from tourneys import setup_tourney_commands
 from rankings import setup_rankings_commands
 from ui_components import EditWRView
+from aiohttp import web
+import os
+
+async def start_dummy_server():
+    """Crea un server web fittizio per accontentare Render."""
+    app = web.Application()
+    app.router.add_get('/', lambda r: web.Response(text="Bot is alive and running!"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    # Render assegna dinamicamente la porta tramite la variabile d'ambiente PORT
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"🌐 Server web fittizio avviato sulla porta {port} per Render")
 
 # Inizializza il bot
 intents = discord.Intents.default()
@@ -105,6 +119,7 @@ async def avvio_iniziale():
     
     # Se hai aggiunto i custom_id anche a ReviewView, decommenta la riga sotto:
     # bot.add_view(ui_components.ReviewView())
+    bot.loop.create_task(start_dummy_server())
     
     print("🗄️ Database e Viste Persistenti inizializzati!")
 
