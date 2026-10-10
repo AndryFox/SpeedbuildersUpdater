@@ -397,9 +397,8 @@ class WRModal(Modal):
             
             new_content = f"{self.original_message.content} - **Accepted ✅**"
             
-            # Passiamo il jump_url che abbiamo appena generato!
-            edit_view = EditWRView(jump_url=jump_url) 
-            await self.original_message.edit(content=new_content, view=edit_view)
+            # Passiamo direttamente la variabile jump_url che il tuo codice calcola già in alto!
+            await self.original_message.edit(content=new_content_msg, view=EditWRView(jump_url=jump_url))
             
             # IL PUNTO 2 (Salvataggio memoria per un Nuovo Record)
             await database_utils.save_button_memory(
