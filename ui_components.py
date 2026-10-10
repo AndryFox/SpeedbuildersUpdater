@@ -157,10 +157,14 @@ class EditWRView(discord.ui.View):
     def __init__(self, jump_url=None):
         super().__init__(timeout=None)
         
-        # Ripristiniamo il tuo terzo tasto (il link al messaggio)
         if jump_url:
-            # Sostituisci l'emoji 🔗 e la scritta con i tuoi originali!
-            self.add_item(discord.ui.Button(label="Go to WR", url=jump_url))
+            # Crea il tasto (Metti la tua scritta e la tua emoji)
+            tasto_link = discord.ui.Button(label="Go to WR", url=jump_url, emoji="🔗")
+            self.add_item(tasto_link)
+            
+            # TRUCCO: Prendiamo il tasto appena aggiunto e lo forziamo al PRIMO POSTO (a sinistra)
+            ultimo_tasto = self.children.pop()
+            self.children.insert(0, ultimo_tasto)
 
     # Rimetti la tua emoji al posto di ✏️ e il tuo label originale
     @discord.ui.button(label="Edit", style=discord.ButtonStyle.blurple, emoji="✏️", custom_id="edit_wr_btn")
