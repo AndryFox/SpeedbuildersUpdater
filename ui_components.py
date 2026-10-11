@@ -159,7 +159,7 @@ class EditWRView(discord.ui.View):
         
         if jump_url:
             # Crea il tasto (Metti la tua scritta e la tua emoji)
-            tasto_link = discord.ui.Button(label="Go to WR", url=jump_url, emoji="🔗")
+            tasto_link = discord.ui.Button(label="Go to WR", url=jump_url)
             self.add_item(tasto_link)
             
             # TRUCCO: Prendiamo il tasto appena aggiunto e lo forziamo al PRIMO POSTO (a sinistra)
