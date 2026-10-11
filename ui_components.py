@@ -211,7 +211,16 @@ class EditWRView(discord.ui.View):
         time_val = data['time_val']
         tipo = data['tipo']
         
-        # --- (QUI LASCIA LA TUA LOGICA DI CANCELLAZIONE WR DAL DATABASE) ---
+        # Cancelliamo il record dal database
+        async with database_utils.pool.acquire() as conn:
+            try:
+                time_float = float(time_val)
+                await conn.execute(
+                    "DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3",
+                    build_key, player, time_float
+                )
+            except Exception as e:
+                print(f"Errore cancellazione DB: {e}")
         
         await database_utils.log_action(
             interaction.user.id, 
@@ -378,19 +387,17 @@ class WRModal(Modal):
                 await msg_to_edit.edit(content=testo_record)
             except: pass
             
-            # IL PUNTO 2 (Aggiornamento memoria in caso di Modifica)
             await database_utils.save_button_memory(
                 message_id=self.original_message.id,
                 build_name=build_key,
                 player_name=current_player,
                 time_val=str(new_time),
                 tipo="WR",
-                update_msg_id=self.original_view.update_msg_id # <--- ECCOLO QUI
+                update_msg_id=self.original_view.update_msg_id
             )
             
             new_content_msg = re.sub(r'\n\|\|#WR#.*\|\|', '', self.original_message.content)
-            # Richiamiamo la view senza parametri!
-            await self.original_message.edit(content=new_content_msg, view=EditWRView()) 
+            await self.original_message.edit(content=new_content_msg, view=EditWRView(jump_url=jump_url)) 
             await interaction.followup.send("✅ Modifica salvata con successo e database aggiornato!", ephemeral=True)
             await database_utils.log_action(interaction.user.id, "EDIT_WR", f"Modificato WR: {build_key} di {current_player} a {new_time}s")
             
@@ -401,17 +408,16 @@ class WRModal(Modal):
             
             new_content = f"{self.original_message.content} - **Accepted ✅**"
             
-            # Passiamo direttamente la variabile jump_url che il tuo codice calcola già in alto!
-            await self.original_message.edit(content=new_content_msg, view=EditWRView(jump_url=jump_url))
+            # Qui usiamo la View corretta e new_content (non new_content_msg)
+            await self.original_message.edit(content=new_content, view=EditWRView(jump_url=jump_url))
             
-            # IL PUNTO 2 (Salvataggio memoria per un Nuovo Record)
             await database_utils.save_button_memory(
                 message_id=self.original_message.id,
                 build_name=build_key,
                 player_name=current_player,
                 time_val=str(new_time),
                 tipo="WR",
-                update_msg_id=update_msg.id # <--- ECCO IL MESSAGGIO PUBBLICO APPENA INVIATO
+                update_msg_id=update_msg.id
             )
             
             await interaction.followup.send("✅ Record approvato!", ephemeral=True)
@@ -432,12 +438,12 @@ class ReviewView(View):
             return False
         return True
 
-    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success, custom_id="review_accept")
     async def accept_btn(self, interaction: discord.Interaction, button: Button):
         attachment = interaction.message.attachments[0] if interaction.message.attachments else None
         await interaction.response.send_modal(WRModal(interaction.client, attachment, self, interaction.message))
 
-    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, custom_id="review_reject")
     async def reject_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
         rejected_channel = interaction.client.get_channel(config.REJECT_CHANNEL_ID)
@@ -452,11 +458,11 @@ class ReviewView(View):
         await interaction.message.delete(delay=20)
         await interaction.followup.send(f"Screen spostato in <#{config.REJECT_CHANNEL_ID}>.", ephemeral=True)
 
-    @discord.ui.button(label="Wr Round", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="Wr Round", style=discord.ButtonStyle.primary, custom_id="review_round")
     async def round_btn(self, interaction: discord.Interaction, button: Button):
         attachment = interaction.message.attachments[0] if interaction.message.attachments else None
         await interaction.response.send_modal(WrRoundModal(interaction.client, attachment, self, interaction.message))
 
-    @discord.ui.button(label="Sim Wr", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Sim Wr", style=discord.ButtonStyle.secondary, custom_id="review_sim")
     async def sim_wr_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(SimWrModal(interaction.client, self, interaction.message))
