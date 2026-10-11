@@ -211,17 +211,32 @@ class EditWRView(discord.ui.View):
         time_val = data['time_val']
         tipo = data['tipo']
         
-        # Cancelliamo il record dal database
+        # 1. Cancelliamo il record dal database E aggiorniamo il Webhook
         async with database_utils.pool.acquire() as conn:
             try:
                 time_float = float(time_val)
+                # Elimina da Supabase
                 await conn.execute(
                     "DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3",
                     build_key, player, time_float
                 )
+                
+                # AGGIORNAMENTO MESSAGGIO WEBHOOK SULLA BUILD
+                msg_row = await conn.fetchrow("SELECT message_id FROM BuildMessages WHERE LOWER(build_name) = LOWER($1)", build_key)
+                if msg_row:
+                    msg_id = msg_row['message_id']
+                    testo_formattato = await database_utils.generate_build_message(build_key)
+                    async with aiohttp.ClientSession() as session:
+                        webhook = discord.Webhook.from_url(config.WORLD_RECORDS_WEBHOOK_URL, session=session)
+                        try:
+                            await webhook.edit_message(msg_id, content=testo_formattato)
+                        except Exception as e:
+                            print(f"Errore webhook edit in undo: {e}")
+                            
             except Exception as e:
                 print(f"Errore cancellazione DB: {e}")
         
+        # 2. Log e pulizia messaggi
         await database_utils.log_action(
             interaction.user.id, 
             "UNDO_WR", 
@@ -229,7 +244,6 @@ class EditWRView(discord.ui.View):
         )
         
         if data.get('update_msg_id'):
-            # Usiamo interaction.client al posto di self.bot
             channel = interaction.client.get_channel(config.UPDATES_CHANNEL_ID)
             if channel:
                 try:
@@ -241,11 +255,11 @@ class EditWRView(discord.ui.View):
         await database_utils.delete_button_memory(interaction.message.id)
         await interaction.message.delete()
 
-        # ---> AGGIUNGI QUESTE DUE RIGHE PER AGGIORNARE LA LISTA SUBITO <---
+        # 3. Aggiorniamo la classifica generale (Leaderboard)
         import rankings
         await rankings.trigger_ranking_update(interaction.client)
         
-        await interaction.followup.send("✅ Record annullato e rimosso.", ephemeral=True)
+        await interaction.followup.send("✅ Record annullato e messaggio Webhook aggiornato.", ephemeral=True)
 
 # --- MODAL PER SIM WR ---
 class SimWrModal(Modal, title='Cerca link per Sim WR'):
