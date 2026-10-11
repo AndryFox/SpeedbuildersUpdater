@@ -240,6 +240,11 @@ class EditWRView(discord.ui.View):
 
         await database_utils.delete_button_memory(interaction.message.id)
         await interaction.message.delete()
+
+        # ---> AGGIUNGI QUESTE DUE RIGHE PER AGGIORNARE LA LISTA SUBITO <---
+        import rankings
+        await rankings.trigger_ranking_update(interaction.client)
+        
         await interaction.followup.send("✅ Record annullato e rimosso.", ephemeral=True)
 
 # --- MODAL PER SIM WR ---
