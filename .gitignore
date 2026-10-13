@@ -1,0 +1,18 @@
+# Variabili d'ambiente (TOKEN, DATABASE, WEBHOOK)
+.env
+
+# Cache di Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ambienti virtuali
+.venv/
+venv/
+env/
+
+# File di sistema e IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
