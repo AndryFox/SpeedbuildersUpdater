@@ -42,7 +42,8 @@ class ImgurModal(Modal, title="Inserisci Link Imgur"):
 
 # --- VIEW PER IL TASTO EDIT (WR ROUNDS) ---
 class EditRoundView(View):
-    def __init__(self, bot, attachment, update_message, def_r, def_w, def_o, def_t, original_message):
+    # Rendi i parametri opzionali (None) per permettere a Discord di ricreare la View ai riavvii
+    def __init__(self, bot=None, attachment=None, update_message=None, def_r="", def_w="", def_o="", def_t="", original_message=None):
         super().__init__(timeout=None)
         self.bot = bot
         self.attachment = attachment
@@ -53,42 +54,62 @@ class EditRoundView(View):
         self.def_t = def_t 
         self.original_message = original_message
 
-    # INSERISCI QUESTO BUTTAFUORI:
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != config.MIO_ID:
             await interaction.response.send_message("❌ Solo l'amministratore può modificare i record.", ephemeral=True)
             return False
         return True
 
-    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, emoji="✏️")
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, emoji="✏️", custom_id="edit_round_btn")
     async def edit_btn(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(
-            WrRoundModal(self.bot, self.attachment, self, self.original_message,
-                         is_edit=True, update_message=self.update_message,
-                         def_r=self.def_r, def_w=self.def_w, def_o=self.def_o, def_t=self.def_t)
+        data = await database_utils.get_round_button_memory(interaction.message.id)
+        if not data:
+            return await interaction.response.send_message("❌ Dati non trovati. Questo record è antecedente all'aggiornamento.", ephemeral=True)
+            
+        # Ricrea il modale usando i dati salvati
+        modal = WrRoundModal(
+            bot=interaction.client, attachment=None, original_view=self, original_message=interaction.message,
+            is_edit=True, update_message=None,
+            def_r=data['def_r'], def_w=data['def_w'], def_o=data['def_o'], def_t=data['def_t']
         )
+        self.update_msg_id = data.get('update_msg_id')
+        await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Add Imgur", style=discord.ButtonStyle.secondary, emoji="🔗")
+    @discord.ui.button(label="Add Imgur", style=discord.ButtonStyle.secondary, emoji="🔗", custom_id="imgur_round_btn")
     async def imgur_btn(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(ImgurModal(self.bot, self.update_message, self.original_message, self.def_r, self.def_w, self.def_o, self.def_t))
+        data = await database_utils.get_round_button_memory(interaction.message.id)
+        if not data:
+            return await interaction.response.send_message("❌ Dati non trovati.", ephemeral=True)
+            
+        await interaction.response.send_modal(ImgurModal(
+            bot=interaction.client, update_message=None, original_message=interaction.message, 
+            def_r=data['def_r'], def_w=data['def_w'], def_o=data['def_o'], def_t=data['def_t']
+        ))
 
-    @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️")
+    @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️", custom_id="undo_round_btn")
     async def undo_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
-        try: await self.update_message.delete()
-        except: pass
+        data = await database_utils.get_round_button_memory(interaction.message.id)
+        if not data:
+            return await interaction.followup.send("❌ Dati non trovati.", ephemeral=True)
             
-        rejected_channel = self.bot.get_channel(config.REJECT_CHANNEL_ID)
-        author_mention = self.original_message.mentions[0].mention if self.original_message.mentions else "l'utente"
-        if rejected_channel and self.attachment:
-            file_to_send = await self.attachment.to_file()
-            await rejected_channel.send(content=f"Screen rifiutato (dopo annullamento) da {author_mention}:", file=file_to_send)
+        # Cancella il messaggio pubblico (se esiste)
+        if data.get('update_msg_id'):
+            channel = interaction.client.get_channel(config.UPDATES_CHANNEL_ID)
+            if channel:
+                try:
+                    pub_msg = await channel.fetch_message(data['update_msg_id'])
+                    await pub_msg.delete()
+                except: pass
+                
+        # Pulisci il database
+        await database_utils.delete_round_button_memory(interaction.message.id)
 
         for child in self.children: child.disabled = True
-        new_content = self.original_message.content.replace("**Accepted ✅**", "**Rejected ❌ (Annullato)**")
-        await self.original_message.edit(content=new_content, view=self)
-        await self.original_message.delete(delay=20)
-        await interaction.followup.send("✅ Record annullato!", ephemeral=True)
+        new_content = interaction.message.content.replace("**Accepted ✅**", "**Rejected ❌ (Annullato)**")
+        await interaction.message.edit(content=new_content, view=self)
+        await interaction.message.delete(delay=20)
+        await interaction.followup.send("✅ Record annullato e rimosso dalla memoria!", ephemeral=True)
 
 # --- MODAL PER I WR ROUND ---
 class WrRoundModal(Modal):
@@ -123,20 +144,24 @@ class WrRoundModal(Modal):
         if not ts_input: ts_input = str(int(time.time()))
         else: ts_input = "".join([c for c in ts_input if c.isdigit()])
 
-        # Il log rimane immacolato come hai richiesto
         testo_record = f'```fix\nWR Rounds (Legit): {new_rounds} Rounds - {current_team}\n```'
 
         if self.is_edit:
-            await self.update_message.edit(content=testo_record)
-            self.original_view.def_r = self.rounds_val.value
-            self.original_view.def_w = self.winner_name.value
-            self.original_view.def_o = self.opponent_name.value
-            self.original_view.def_t = ts_input
-            await self.original_message.edit(view=self.original_view)
+            channel = interaction.client.get_channel(config.UPDATES_CHANNEL_ID)
+            try:
+                msg_to_edit = await channel.fetch_message(getattr(self.original_view, 'update_msg_id', 0))
+                await msg_to_edit.edit(content=testo_record)
+            except: pass
+            
+            # SALVA NELLA MEMORIA DOPO MODIFICA
+            await database_utils.save_round_button_memory(
+                self.original_message.id, self.rounds_val.value, self.winner_name.value, 
+                self.opponent_name.value, ts_input, getattr(self.original_view, 'update_msg_id', None)
+            )
             
             # Stringa vuota su link conserva quello già esistente nel webhook
             await rankings.add_or_update_round_record(self.bot, new_rounds, current_team, ts_input, "")
-            await interaction.followup.send("✅ Modifica salvata e classifica aggiornata!", ephemeral=True)
+            await interaction.followup.send("✅ Modifica salvata, database aggiornato e classifica aggiornata!", ephemeral=True)
             
         else:
             channel = self.bot.get_channel(config.UPDATES_CHANNEL_ID)
@@ -147,9 +172,14 @@ class WrRoundModal(Modal):
             new_content = f"{self.original_message.content} - **Accepted ✅**"
             await self.original_message.edit(content=new_content, view=edit_view)
             
+            # SALVA NELLA MEMORIA DOPO CREAZIONE
+            await database_utils.save_round_button_memory(
+                self.original_message.id, self.rounds_val.value, self.winner_name.value, 
+                self.opponent_name.value, ts_input, update_msg.id
+            )
+            
             await rankings.add_or_update_round_record(self.bot, new_rounds, current_team, ts_input, "")
-            await interaction.followup.send("✅ WR Rounds inserito in classifica! (Aggiungi link Imgur dalla chat)", ephemeral=True)
-
+            await interaction.followup.send("✅ WR Rounds inserito! (Aggiungi link Imgur dalla chat)", ephemeral=True)
 
 # --- VIEW PER IL TASTO EDIT (WR NORMALI) ---
 class EditWRView(discord.ui.View):
