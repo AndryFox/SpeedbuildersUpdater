@@ -1,22 +1,12 @@
 import discord
-from discord import app_commands 
 from discord.ext import commands
-import re
-import asyncio
-import aiohttp
-import shutil
-from datetime import datetime
-
-# Importiamo i nostri moduli
-import database_utils
-import config
-import rankings
-import ui_components
-from tourneys import setup_tourney_commands
-from rankings import setup_rankings_commands
-from ui_components import EditWRView
-from aiohttp import web
 import os
+from aiohttp import web
+
+# Importiamo i nostri moduli necessari per l'avvio
+import config
+import database_utils
+from ui_components import EditWRView, ReviewView
 
 async def start_dummy_server():
     """Crea un server web fittizio per accontentare Render."""
@@ -25,200 +15,42 @@ async def start_dummy_server():
     runner = web.AppRunner(app)
     await runner.setup()
     
-    # Render assegna dinamicamente la porta tramite la variabile d'ambiente PORT
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     print(f"🌐 Server web fittizio avviato sulla porta {port} per Render")
 
-# Inizializza il bot
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+class SpeedBuildersBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        super().__init__(command_prefix="!", intents=intents)
 
-'''
-@bot.tree.command(name="setup_all_builds", description="Invia i messaggi delle build e salva gli ID nel DB")
-@app_commands.default_permissions(administrator=True)
-async def setup_all_builds(interaction: discord.Interaction):
-    # [Comando disabilitato e conservato per backup]
-    pass
-'''
-
-@bot.tree.command(name="manual_submit", description="Invia un record in revisione per conto di un altro utente (Solo Admin)")
-@app_commands.describe(player="L'utente che ha fatto il record", image="Lo screenshot del record")
-@app_commands.default_permissions(administrator=True)
-async def manual_submit(interaction: discord.Interaction, player: discord.Member, image: discord.Attachment):
-    # Buttafuori: Solo tu puoi usare questo comando
-    if interaction.user.id != config.MIO_ID:
-        return await interaction.response.send_message("❌ Accesso negato.", ephemeral=True)
-
-    # defer(ephemeral=True) fa sì che il comando carichi in modo "invisibile" per gli altri
-    await interaction.response.defer(ephemeral=True)
-
-    review_channel = bot.get_channel(config.REVIEW_CHANNEL_ID)
-    
-    if not review_channel:
-        return await interaction.followup.send("❌ Errore: Canale di revisione non trovato.", ephemeral=True)
-
-    # Prepara il file e i bottoni
-    view = ui_components.ReviewView()
-    file_review = await image.to_file()
-
-    # Invia il messaggio fasullo nel canale di revisione
-    await review_channel.send(
-        content=f"New world record sent from {player.mention}",
-        file=file_review,
-        view=view
-    )
-
-    # Ti conferma che è andato tutto a buon fine senza che nessuno lo legga
-    await interaction.followup.send(f"🥷 ✅ Operazione fantasma completata! Screenshot inviato in revisione per conto di {player.mention}.", ephemeral=True)
-
-@bot.tree.command(name="add_alias", description="🔧 Unisce i record di un vecchio nome al nuovo nome (Solo Admin)")
-@app_commands.describe(vecchio_nome="Il nome vecchio (es. blaagoosb)", nuovo_nome="Il nome corretto (es. M2xD)")
-@app_commands.default_permissions(administrator=True) # Solo gli admin possono usarlo
-async def add_alias(interaction: discord.Interaction, vecchio_nome: str, nuovo_nome: str):
-    v_name = vecchio_nome.lower()
-
-    import database_utils
-    async with database_utils.pool.acquire() as conn:
-        # Salviamo nel database
-        await conn.execute(
-            "INSERT INTO Aliases (old_name, new_name) VALUES ($1, $2) ON CONFLICT (old_name) DO UPDATE SET new_name = $2", 
-            v_name, nuovo_nome
-        )
-        # Aggiungiamo anche la doppia sicurezza per le maiuscole (come facevamo su config.py)
-        n_name_lower = nuovo_nome.lower()
-        if v_name != n_name_lower:
-            await conn.execute(
-                "INSERT INTO Aliases (old_name, new_name) VALUES ($1, $2) ON CONFLICT (old_name) DO UPDATE SET new_name = $2", 
-                n_name_lower, nuovo_nome
-            )
-
-    # Aggiorniamo la RAM in tempo reale e ricalcoliamo le classifiche
-    await database_utils.load_aliases()
-    import rankings
-    await rankings.trigger_ranking_update(bot)
-       
-    await interaction.response.send_message(f"✅ Identità unite! Tutti i record passati e futuri di `{vecchio_nome}` apparterranno a **{nuovo_nome}**.", ephemeral=True)
-    await database_utils.log_action(
-        interaction.user.id, 
-        "ADD_ALIAS", 
-        f"Unito vecchio nome '{vecchio_nome}' nel nuovo nome '{nuovo_nome}'"
-    )
-
-from ui_components import EditWRView # Assicurati di importarla!
-
-# Creiamo la funzione di avvio per il nostro bot
-async def avvio_iniziale():
-    await database_utils.init_pool()
-    await database_utils.load_aliases()
-    
-    # Questa riga dice al bot: "Resta in ascolto di questi bottoni per sempre!"
-    bot.add_view(EditWRView())
-    
-    # Se hai aggiunto i custom_id anche a ReviewView, decommenta la riga sotto:
-    # bot.add_view(ui_components.ReviewView())
-    bot.loop.create_task(start_dummy_server())
-    
-    print("🗄️ Database e Viste Persistenti inizializzati!")
-
-# Agganciamo la funzione al bot globale
-bot.setup_hook = avvio_iniziale
-
-import traceback
-
-# 1. Cattura gli errori degli eventi e dei pulsanti
-@bot.event
-async def on_error(event_method, *args, **kwargs):
-    log_channel = bot.get_channel(config.LOG_CHANNEL_ID)
-    if log_channel:
-        error_msg = traceback.format_exc()
-        # Tagliamo il messaggio se è troppo lungo per Discord
-        if len(error_msg) > 1900:
-            error_msg = error_msg[-1900:]
-        await log_channel.send(f"⚠️ **Errore Critico (Evento: {event_method})**\n```py\n{error_msg}\n```")
-
-# 2. Cattura gli errori dei comandi Slash (come /add_alias)
-@bot.tree.error
-async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-    log_channel = bot.get_channel(config.LOG_CHANNEL_ID)
-    if log_channel:
-        await log_channel.send(f"⚠️ **Errore nel comando `/{interaction.command.name}` usato da {interaction.user.name}**\n```py\n{error}\n```")
-    
-    # Avvisiamo l'utente che qualcosa è andato storto senza mostrargli codici strani
-    if interaction.response.is_done():
-        await interaction.followup.send("❌ Ops! Si è verificato un errore interno. L'amministratore è stato avvisato.", ephemeral=True)
-    else:
-        await interaction.response.send_message("❌ Ops! Si è verificato un errore interno. L'amministratore è stato avvisato.", ephemeral=True)
-
-from discord import app_commands
-import discord
-import database_utils
-
-@bot.event
-async def on_ready():
-    print(f"✅ Bot {bot.user} avviato con successo e collegato al Cloud!")
-
-    setup_tourney_commands(bot)
-    setup_rankings_commands(bot)
-
-    # 1. Puliamo i comandi doppi specifici del server
-    IL_MIO_SERVER = discord.Object(id=935816490039533621) 
-    
-    bot.tree.clear_commands(guild=IL_MIO_SERVER) 
-    await bot.tree.sync(guild=IL_MIO_SERVER)     
-    
-    # 2. Manteniamo solo la sincronizzazione globale pulita
-    await bot.tree.sync()
-
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    # --- SENSORE: Se scrivi un NUOVO messaggio a mano nel database ---
-    if message.channel.id == config.WR_CHANNEL_ID:
-        await rankings.trigger_ranking_update(bot)
-
-    if message.channel.id != config.SUBMISSION_CHANNEL_ID:
-        await bot.process_commands(message)
-        return
-
-    has_media = len(message.attachments) > 0
-    has_tag = any(mention.id == config.MIO_ID for mention in message.mentions)
-
-    if has_media and has_tag:
-        review_channel = bot.get_channel(config.REVIEW_CHANNEL_ID)
+    async def setup_hook(self):
+        # 1. Inizializziamo il database
+        await database_utils.init_pool()
+        await database_utils.load_aliases()
         
-        for attachment in message.attachments:
-            view = ui_components.ReviewView()
-            file_review = await attachment.to_file()
-            
-            await review_channel.send(
-                content=f"New world record sent from {message.author.mention}",
-                file=file_review,
-                view=view
-            )
-            
-        await message.channel.send(f"{message.author.mention}, your world record has been sent for review!", delete_after=5)
-
-    await bot.process_commands(message)
-
-@bot.event
-async def on_raw_message_edit(payload):
-    """Sensore: si accorge se modifichi un testo esistente nel database"""
-    if payload.channel_id == config.WR_CHANNEL_ID:
-        await rankings.trigger_ranking_update(bot)
-        await rankings.trigger_rounds_update(bot)
-
-@bot.event
-async def on_raw_message_delete(payload):
-    """Sensore: si accorge se elimini un record dal database"""
-    if payload.channel_id == config.WR_CHANNEL_ID:
-        await rankings.trigger_ranking_update(bot)
-        await rankings.trigger_rounds_update(bot)
+        # 2. Carichiamo automaticamente tutti i moduli (Cogs) dalla cartella 'cogs'
+        for filename in os.listdir('./cogs'):
+            if filename.endswith('.py'):
+                await self.load_extension(f'cogs.{filename[:-3]}')
+                print(f"⚙️ Modulo (Cog) caricato: {filename}")
+        
+        # 3. Avviamo le Viste Persistenti per renderle immortali
+        self.add_view(EditWRView())
+        self.add_view(ReviewView()) # Ho aggiunto anche ReviewView per i tasti Accept/Reject!
+        
+        # 4. Sincronizziamo i comandi Slash globali
+        await self.tree.sync()
+        
+        # 5. Avviamo il server fittizio per Render in background
+        self.loop.create_task(start_dummy_server())
+        
+        print("🗄️ Database e Viste Persistenti inizializzati!")
 
 # Avvio del bot
+bot = SpeedBuildersBot()
+
 if __name__ == "__main__":
     bot.run(config.TOKEN)
