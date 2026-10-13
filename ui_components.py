@@ -5,7 +5,6 @@ import config
 import rankings
 from database_utils import get_main_name, get_wr_count, get_sim_wr_link
 import time
-import asyncpg
 import aiohttp
 import database_utils
 
