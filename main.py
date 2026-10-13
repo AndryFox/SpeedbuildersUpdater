@@ -6,7 +6,7 @@ from aiohttp import web
 # Importiamo i nostri moduli necessari per l'avvio
 import config
 import database_utils
-from ui_components import EditWRView, ReviewView
+from ui_components import EditWRView, ReviewView, EditRoundView
 
 async def start_dummy_server():
     """Crea un server web fittizio per accontentare Render."""
@@ -40,6 +40,7 @@ class SpeedBuildersBot(commands.Bot):
         # 3. Avviamo le Viste Persistenti per renderle immortali
         self.add_view(EditWRView())
         self.add_view(ReviewView()) 
+        self.add_view(EditRoundView())
         
         # 4. Sincronizzazione Comandi Slash (Unica e Sicura)
         IL_MIO_SERVER = discord.Object(id=935816490039533621) 
