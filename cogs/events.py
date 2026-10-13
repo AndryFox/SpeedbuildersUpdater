@@ -20,11 +20,7 @@ class BotEvents(commands.Cog):
         print(f"✅ Bot {self.bot.user} avviato con successo e collegato al Cloud!")
 
         setup_tourney_commands(self.bot)
-        setup_rankings_commands(self.bot)
-
-        IL_MIO_SERVER = discord.Object(id=935816490039533621) 
-        self.bot.tree.clear_commands(guild=IL_MIO_SERVER) 
-        await self.bot.tree.sync(guild=IL_MIO_SERVER)     
+        setup_rankings_commands(self.bot)  
 
     @commands.Cog.listener()
     async def on_message(self, message):
