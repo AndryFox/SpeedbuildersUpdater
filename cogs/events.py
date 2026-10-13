@@ -5,8 +5,6 @@ import traceback
 import config
 import rankings
 import ui_components
-from tourneys import setup_tourney_commands
-from rankings import setup_rankings_commands
 
 class BotEvents(commands.Cog):
     def __init__(self, bot):
@@ -18,9 +16,6 @@ class BotEvents(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         print(f"✅ Bot {self.bot.user} avviato con successo e collegato al Cloud!")
-
-        setup_tourney_commands(self.bot)
-        setup_rankings_commands(self.bot)  
 
     @commands.Cog.listener()
     async def on_message(self, message):
