@@ -39,15 +39,18 @@ class SpeedBuildersBot(commands.Bot):
         
         # 3. Avviamo le Viste Persistenti per renderle immortali
         self.add_view(EditWRView())
-        self.add_view(ReviewView()) # Ho aggiunto anche ReviewView per i tasti Accept/Reject!
+        self.add_view(ReviewView()) 
         
-        # 4. Sincronizziamo i comandi Slash globali
-        await self.tree.sync()
+        # 4. Sincronizzazione Comandi Slash (Unica e Sicura)
+        IL_MIO_SERVER = discord.Object(id=935816490039533621) 
+        self.tree.clear_commands(guild=IL_MIO_SERVER) 
+        await self.tree.sync(guild=IL_MIO_SERVER)
+        await self.tree.sync() # Sincronizzazione globale
         
         # 5. Avviamo il server fittizio per Render in background
         self.loop.create_task(start_dummy_server())
         
-        print("🗄️ Database e Viste Persistenti inizializzati!")
+        print("🗄️ Database, Viste e Comandi inizializzati!")
 
 # Avvio del bot
 bot = SpeedBuildersBot()
