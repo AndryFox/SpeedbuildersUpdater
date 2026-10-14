@@ -87,22 +87,35 @@ class RankingCommands(commands.Cog):
                     records.append(f"▸ Build: **{row['build_name']}** ⸻ `{row['time']}s`")
                         
         count = len(records)
-        if count > 0:
+        # Recuperiamo le medaglie dalla tabella tourney_hof!
+        trophies = await database_utils.get_player_trophies(player_norm)
+        
+        if count > 0 or trophies:
             ruolo = rankings.get_role_tag(count)
-            nome_estetico = rankings.DISPLAY_NAMES_CACHE.get(player_norm, player)
+            nome_estetico = rankings.DISPLAY_NAMES_CACHE.get(player_norm, player_norm)
             avatar_url = f"https://minotar.net/helm/{player_norm}/256.png"
-            embed = discord.Embed(description=f"**Current Rank:** {ruolo}\n\n", color=discord.Color.gold())
+            
+            desc = f"**Current Rank:** {ruolo}\n"
+            if trophies:
+                desc += f"🏆 **Tourney Trophies:** {' • '.join(trophies)}\n"
+            desc += "\n"
+            
+            embed = discord.Embed(description=desc, color=discord.Color.gold())
             embed.set_author(name=f"{nome_estetico}'s World Records ({count})", icon_url=avatar_url)
             embed.set_thumbnail(url=avatar_url)
             
-            lista_formattata = "\n".join(records)
-            if len(lista_formattata) > 3900: lista_formattata = lista_formattata[:3900] + "\n\n*... and more!*"
-            embed.description += lista_formattata
+            if count > 0:
+                lista_formattata = "\n".join(records)
+                if len(lista_formattata) > 3800: 
+                    lista_formattata = lista_formattata[:3800] + "\n\n*... and more!*"
+                embed.description += lista_formattata
+            else:
+                embed.description += "*No active Build WRs at the moment.*"
+                
             embed.set_footer(text="FearGames Speedbuilders", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
             await interaction.followup.send(embed=embed)
         else:
-            await interaction.followup.send(f"📉 **{player}** has no WRs at the moment.")
-
+            await interaction.followup.send(f"📉 **{player}** has no WRs or Tourney Trophies at the moment.")
     @app_commands.command(name="wrssim", description="Check all Sim WRs of a player")
     @app_commands.describe(player="The name of the player")
     @app_commands.autocomplete(player=player_autocomplete)
