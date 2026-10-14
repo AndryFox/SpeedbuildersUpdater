@@ -733,7 +733,8 @@ async def delete_tourney_hof(sigla: str, edizione: str) -> bool:
 async def generate_hof_embed_text() -> str:
     """Genera il testo della Hall of Fame leggendo direttamente da Supabase."""
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT sigla, edizione, primo, secondo, terzo, note FROM tourney_hof ORDER BY id ASC")
+        # Modificato: ordina per edizione (2022, 2023, 2024...) invece che per ID di inserimento!
+        rows = await conn.fetch("SELECT sigla, edizione, primo, secondo, terzo, note FROM tourney_hof ORDER BY edizione ASC")
 
     sbit_list = []
     sbil_list = []
