@@ -85,15 +85,19 @@ class EditRoundView(View):
             bot=interaction.client, update_message=None, original_message=interaction.message, 
             def_r=data['def_r'], def_w=data['def_w'], def_o=data['def_o'], def_t=data['def_t']
         ))
-
     @discord.ui.button(label="Undo / Reject", style=discord.ButtonStyle.danger, emoji="🗑️", custom_id="undo_round_btn")
     async def undo_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
         data = await database_utils.get_round_button_memory(interaction.message.id)
         if not data:
-            return await interaction.followup.send("❌ Dati non trovati.", ephemeral=True)
+            return await interaction.followup.send("❌ Dati non trovati. Questo record è antecedente all'aggiornamento.", ephemeral=True)
             
-        # Cancella il messaggio pubblico (se esiste)
+        # 1. Rimuovi il record dalla classifica pubblica (Webhook)
+        rounds_int = int(data['def_r']) if str(data['def_r']).isdigit() else 0
+        current_team = f"{data['def_w'].strip()} & {data['def_o'].strip()}"
+        await rankings.remove_round_record(interaction.client, rounds_int, current_team, data['def_t'])
+
+        # 2. Cancella il messaggio di annuncio su #wrs-updated (se esiste)
         if data.get('update_msg_id'):
             channel = interaction.client.get_channel(config.UPDATES_CHANNEL_ID)
             if channel:
@@ -102,15 +106,29 @@ class EditRoundView(View):
                     await pub_msg.delete()
                 except: pass
                 
-        # Pulisci il database
+        # 3. Sposta lo screen nel canale rejected
+        rejected_channel = interaction.client.get_channel(config.REJECT_CHANNEL_ID)
+        attachment = interaction.message.attachments[0] if interaction.message.attachments else None
+        author_mention = interaction.message.mentions[0].mention if interaction.message.mentions else "l'utente"
+        if rejected_channel and attachment:
+            file_to_send = await attachment.to_file()
+            await rejected_channel.send(content=f"Screen WR Round rifiutato (dopo annullamento) da {author_mention}:", file=file_to_send)
+
+        # 4. Registra l'azione nel log e pulisci il database
+        await database_utils.log_action(
+            interaction.user.id, 
+            "UNDO_ROUND", 
+            f"Annullato WR Round: {rounds_int} Rounds di {current_team}"
+        )
         await database_utils.delete_round_button_memory(interaction.message.id)
 
+        # 5. Aggiorna ed elimina il messaggio di revisione
         for child in self.children: child.disabled = True
         new_content = interaction.message.content.replace("**Accepted ✅**", "**Rejected ❌ (Annullato)**")
         await interaction.message.edit(content=new_content, view=self)
         await interaction.message.delete(delay=20)
-        await interaction.followup.send("✅ Record annullato e rimosso dalla memoria!", ephemeral=True)
-
+        await interaction.followup.send("✅ Record annullato e rimosso dalla classifica!", ephemeral=True)
+    
 # --- MODAL PER I WR ROUND ---
 class WrRoundModal(Modal):
     def __init__(self, bot, attachment, original_view, original_message, is_edit=False, update_message=None, def_r="", def_w="", def_o="", def_t=""):
