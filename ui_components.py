@@ -220,6 +220,12 @@ class EditWRView(discord.ui.View):
             ultimo_tasto = self.children.pop()
             self.children.insert(0, ultimo_tasto)
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != config.MIO_ID:
+            await interaction.response.send_message("❌ Solo l'amministratore può modificare o annullare i record.", ephemeral=True)
+            return False
+        return True
+
     # Rimetti la tua emoji al posto di ✏️ e il tuo label originale
     @discord.ui.button(label="Edit", style=discord.ButtonStyle.blurple, emoji="✏️", custom_id="edit_wr_btn")
     async def edit_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
