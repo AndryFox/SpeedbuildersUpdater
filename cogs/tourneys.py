@@ -32,7 +32,7 @@ class Tournaments(commands.Cog):
         
         async with aiohttp.ClientSession() as session:
             webhook = discord.Webhook.from_url(config.TOURNEY_WEBHOOK_URL, session=session)
-            msg = await webhook.send(embed=embed, username="Tourneys Updater", wait=True)
+            msg = await webhook.send(embed=embed, username="Hall of Fame Guardian", wait=True)
             
         await interaction.followup.send(f"✅ Messaggio inviato con i dati di Supabase! ID per config.py:\n**{msg.id}**", ephemeral=True)
 
