@@ -212,3 +212,75 @@ async def add_or_update_round_record(bot, rounds: int, team: str, timestamp: str
     async with aiohttp.ClientSession() as session:
         webhook = discord.Webhook.from_url(config.RANKINGS_WEBHOOK_URL, session=session)
         await webhook.edit_message(config.RANKING_ROUNDS_MSG_ID, content=final_text)
+
+async def remove_round_record(bot, rounds: int, team: str, timestamp: str):
+    channel = bot.get_channel(config.RANKINGS_CHANNEL_ID)
+    if not channel: return
+    try:
+        msg = await channel.fetch_message(config.RANKING_ROUNDS_MSG_ID)
+        content = msg.content
+    except: return
+    
+    records = []
+    current_rounds = 0
+    
+    # 1. Legge la classifica attuale
+    for line in content.split('\n'):
+        r_match = re.search(r'\*\*_*(.*?)\s*Rounds_*\*\*', line, re.IGNORECASE)
+        if r_match:
+            try: current_rounds = int(r_match.group(1).replace("_", "").strip())
+            except: pass
+            
+        if "<t:" in line and "|" in line and current_rounds > 0:
+            ts_match = re.search(r'<t:(\d+):F>', line)
+            team_match = re.search(r'\*\*\[(.*?)\]', line)
+            link_match = re.search(r'\]\(<(.*?)>\)\*\*', line)
+            
+            if ts_match and team_match:
+                ts = ts_match.group(1)
+                t_name = team_match.group(1).replace("&amp;", "&")
+                l = link_match.group(1) if link_match else ""
+                if "in-attesa-di-link" in l: l = ""
+                
+                # SALTIAMO il record se corrisponde a quello che stiamo annullando!
+                if current_rounds == rounds and t_name.lower() == team.lower() and ts == str(timestamp):
+                    continue
+                    
+                records.append({"rounds": current_rounds, "team": t_name, "timestamp": ts, "link": l})
+        
+    # 2. Riordina e Raggruppa i record rimasti
+    records = sorted(records, key=lambda x: x["rounds"], reverse=True)
+    grouped = {}
+    for r in records:
+        if r["rounds"] not in grouped: grouped[r["rounds"]] = []
+        grouped[r["rounds"]].append(r)
+        
+    # 3. Recupera l'intestazione esatta intatta
+    header = "## In total Fear Games have: __140 Builds__\n\nThe Wr rounds **(Legit)** on Fear Games is:\n"
+    header_match = re.match(r'(.*?The Wr rounds.*?:)', content, re.DOTALL | re.IGNORECASE)
+    if header_match: header = header_match.group(1).strip() + "\n"
+        
+    # 4. Formattazione di precisione
+    final_text = header + " \n"
+    pos_map = [":first_place:", ":second_place:", ":third_place:"]
+    idx = 0
+    
+    for r_val, team_records in grouped.items():
+        pos_emoji = pos_map[idx] if idx < 3 else f"{idx+1}th"
+        final_text += f"{pos_emoji} **__{r_val} Rounds__**\n"
+        
+        for i, tr in enumerate(team_records):
+            prefix = "> " if i == 0 else ""
+            link_str = f"(<{tr['link']}>)" if tr['link'] else "(<https://in-attesa-di-link>)"
+            final_text += f"{prefix}<t:{tr['timestamp']}:F> | **[{tr['team']}]{link_str}**\n"
+            
+        final_text += "\n"
+        idx += 1
+        
+    tag_speedbuilders = getattr(config, 'ROLE_SPEEDBUILDERS', '||@Speedbuilders||')
+    final_text += tag_speedbuilders
+    
+    # 5. Salva tramite Webhook
+    async with aiohttp.ClientSession() as session:
+        webhook = discord.Webhook.from_url(config.RANKINGS_WEBHOOK_URL, session=session)
+        await webhook.edit_message(config.RANKING_ROUNDS_MSG_ID, content=final_text)
