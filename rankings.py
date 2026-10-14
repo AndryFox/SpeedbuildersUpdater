@@ -44,7 +44,7 @@ def get_ordinal(n: int) -> str:
     return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 async def generate_wr_ranking_text(bot) -> str:
-    global PLAYERS_CACHE 
+    global PLAYERS_CACHE, DISPLAY_NAMES_CACHE
     
     wr_counts = {}
     display_names = {}
@@ -71,6 +71,7 @@ async def generate_wr_ranking_text(bot) -> str:
                     display_names[nome_norm] = nome_grezzo
 
     PLAYERS_CACHE = sorted(list({v.replace("\\", "") for v in display_names.values()}))
+    DISPLAY_NAMES_CACHE = display_names.copy()
     
     # 2. Raggruppiamo i giocatori per punteggio 
     sorted_wrs = sorted(wr_counts.items(), key=lambda x: x[1], reverse=True)
