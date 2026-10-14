@@ -710,3 +710,59 @@ async def delete_round_button_memory(message_id: int):
             await conn.execute("DELETE FROM roundbuttonmemory WHERE message_id = $1", message_id)
     except Exception as e:
         print(f"⚠️ Errore cancellazione roundbuttonmemory: {e}")
+
+async def upsert_tourney_hof(sigla: str, edizione: str, primo: str, secondo: str, terzo: str, note: str = ""):
+    """Salva o aggiorna un'edizione del torneo su Supabase."""
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO tourney_hof (sigla, edizione, primo, secondo, terzo, note)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (sigla, edizione) 
+            DO UPDATE SET primo = EXCLUDED.primo, secondo = EXCLUDED.secondo, terzo = EXCLUDED.terzo, note = EXCLUDED.note
+        """, sigla.upper().strip(), edizione.strip(), primo.strip(), secondo.strip(), terzo.strip(), note.strip())
+
+async def delete_tourney_hof(sigla: str, edizione: str) -> bool:
+    """Elimina un'edizione del torneo da Supabase."""
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "DELETE FROM tourney_hof WHERE UPPER(sigla) = UPPER($1) AND LOWER(edizione) = LOWER($2)",
+            sigla.strip(), edizione.strip()
+        )
+        return res != "DELETE 0"
+
+async def generate_hof_embed_text() -> str:
+    """Genera il testo della Hall of Fame leggendo direttamente da Supabase."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT sigla, edizione, primo, secondo, terzo, note FROM tourney_hof ORDER BY id ASC")
+
+    sbit_list = []
+    sbil_list = []
+
+    for r in rows:
+        # Evitiamo che gli underscore nei nomi attivino il corsivo di Discord
+        p1 = get_main_name(r['primo']).replace("_", "\\_")
+        p2 = get_main_name(r['secondo']).replace("_", "\\_")
+        p3 = get_main_name(r['terzo']).replace("_", "\\_")
+        note_str = f" *({r['note']})*" if r['note'] else ""
+
+        blocco = (
+            f"🏆 **{r['sigla']} {r['edizione']}**{note_str}\n"
+            f"> :first_place: **__{p1}__**\n"
+            f"> :second_place: **{p2}**\n"
+            f"> :third_place: {p3}"
+        )
+        
+        if r['sigla'].upper() == "SBIT":
+            sbit_list.append(blocco)
+        else:
+            sbil_list.append(blocco)
+
+    testo = "# Hall of Fame\n\n"
+    
+    testo += "## ☀️ **SBIT** (Summer Tourney)\n"
+    testo += "\n\n".join(sbit_list) if sbit_list else "*Nessuna edizione registrata.*"
+    
+    testo += "\n\n## ❄️ **SBIL** (Winter Tourney)\n"
+    testo += "\n\n".join(sbil_list) if sbil_list else "*Nessuna edizione registrata.*"
+
+    return testo
