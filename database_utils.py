@@ -767,3 +767,24 @@ async def generate_hof_embed_text() -> str:
     testo += "\n\n".join(sbil_list) if sbil_list else "*Nessuna edizione registrata.*"
 
     return testo
+
+async def get_player_trophies(player_name: str) -> list[str]:
+    """Restituisce la lista delle medaglie vinte nei tornei da un giocatore (supporta gli alias)."""
+    target_norm = get_main_name(player_name).lower()
+    trophies = []
+    
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT sigla, edizione, primo, secondo, terzo FROM tourney_hof ORDER BY edizione ASC")
+        
+    for r in rows:
+        sigla = r['sigla'].upper()
+        ed = r['edizione']
+        
+        if get_main_name(r['primo']).lower() == target_norm:
+            trophies.append(f"🥇 **{sigla} {ed}**")
+        if get_main_name(r['secondo']).lower() == target_norm:
+            trophies.append(f"🥈 **{sigla} {ed}**")
+        if get_main_name(r['terzo']).lower() == target_norm:
+            trophies.append(f"🥉 **{sigla} {ed}**")
+            
+    return trophies
