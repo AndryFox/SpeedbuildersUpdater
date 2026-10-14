@@ -171,13 +171,20 @@ class WrRoundModal(Modal):
                 await msg_to_edit.edit(content=testo_record)
             except: pass
             
+            # ---> NOVITÀ: Rimuoviamo i vecchi dati dalla classifica prima di inserire quelli nuovi <---
+            old_data = await database_utils.get_round_button_memory(self.original_message.id)
+            if old_data:
+                old_r = int(old_data['def_r']) if str(old_data['def_r']).isdigit() else 0
+                old_team = f"{old_data['def_w'].strip()} & {old_data['def_o'].strip()}"
+                if old_r != new_rounds or old_team.lower() != current_team.lower():
+                    await rankings.remove_round_record(self.bot, old_r, old_team, old_data['def_t'])
+
             # SALVA NELLA MEMORIA DOPO MODIFICA
             await database_utils.save_round_button_memory(
                 self.original_message.id, self.rounds_val.value, self.winner_name.value, 
                 self.opponent_name.value, ts_input, getattr(self.original_view, 'update_msg_id', None)
             )
             
-            # Stringa vuota su link conserva quello già esistente nel webhook
             await rankings.add_or_update_round_record(self.bot, new_rounds, current_team, ts_input, "")
             await interaction.followup.send("✅ Modifica salvata, database aggiornato e classifica aggiornata!", ephemeral=True)
             
