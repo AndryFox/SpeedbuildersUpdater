@@ -28,9 +28,16 @@ class RankingCommands(commands.Cog):
         current_lower = current.lower()
         async with database_utils.pool.acquire() as conn:
             rows = await conn.fetch("SELECT DISTINCT player_name FROM WorldRecords")
+            hof_rows = await conn.fetch("SELECT primo, secondo, terzo FROM tourney_hof")
         
         main_names = {database_utils.get_main_name(row['player_name']) for row in rows}
         main_names.update(database_utils.ALIASES_CACHE.values())
+        
+        # Aggiungiamo anche i vincitori dei tornei ai suggerimenti!
+        for r in hof_rows:
+            main_names.add(database_utils.get_main_name(r['primo']))
+            main_names.add(database_utils.get_main_name(r['secondo']))
+            main_names.add(database_utils.get_main_name(r['terzo']))
             
         choices = [app_commands.Choice(name=name, value=name) for name in main_names if not current_lower or current_lower in name.lower()]
         return sorted(choices, key=lambda x: x.name.lower())[:25]
