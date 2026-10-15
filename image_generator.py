@@ -26,7 +26,6 @@ def get_font(size: int, bold: bool = True):
             except Exception:
                 pass
 
-    # Se non trova nulla in locale, scarica da CDN diretto affidabile
     try:
         url = "https://cdn.jsdelivr.net/gh/googlefonts/roboto@main/src/hinted/Roboto-Black.ttf"
         urllib.request.urlretrieve(url, FONT_BOLD_PATH)
@@ -50,7 +49,6 @@ async def get_player_3d_skin(player_name: str):
                     if resp.status == 200:
                         data = await resp.read()
                         img = Image.open(io.BytesIO(data)).convert("RGBA")
-                        # Ritaglia eventuale spazio trasparente in eccesso attorno al personaggio
                         bbox = img.getbbox()
                         if bbox:
                             img = img.crop(bbox)
@@ -86,7 +84,7 @@ def draw_centered_text(draw, text, xy, size=22, color=(255, 255, 255), bold=True
         draw.text((x + 2, y + 2), text_str, font=font, fill=(0, 0, 0, 210))
     draw.text((x, y), text_str, font=font, fill=color)
 
-def draw_split_values(draw, v1_str, v2_str, center_xy, size=24, c1=(255, 165, 50), c2=(215, 155, 105)):
+def draw_split_values(draw, v1_str, v2_str, center_xy, size=26, c1=(255, 165, 50), c2=(215, 155, 105)):
     """Disegna 'Valore1 / Valore2' perfettamente centrato sulla barra '/'."""
     font = get_font(size, bold=True)
     slash = " / "
@@ -101,23 +99,20 @@ def draw_split_values(draw, v1_str, v2_str, center_xy, size=24, c1=(255, 165, 50
     start_x = center_xy[0] - total_w / 2
     y = center_xy[1] - h / 2 - b1[1]
 
-    # Ombra
     draw.text((start_x + 2, y + 2), v1_str, font=font, fill=(0, 0, 0, 210))
     draw.text((start_x + w1 + 2, y + 2), slash, font=font, fill=(0, 0, 0, 210))
     draw.text((start_x + w1 + ws + 2, y + 2), v2_str, font=font, fill=(0, 0, 0, 210))
 
-    # Testo colorato
     draw.text((start_x, y), v1_str, font=font, fill=c1)
     draw.text((start_x + w1, y), slash, font=font, fill=(190, 190, 190))
     draw.text((start_x + w1 + ws, y), v2_str, font=font, fill=c2)
 
 async def generate_compare_gui(p1_name, p2_name, stats):
-    W, H = 1200, 650
+    W, H = 1200, 640
     sfondi = [f for f in os.listdir() if f.startswith("bg") and f.lower().endswith((".jpg", ".png", ".jpeg"))]
     try:
         if sfondi:
             base = Image.open(random.choice(sfondi)).convert("RGBA").resize((W, H))
-            # Velo scuro leggero sullo sfondo per far risaltare i box
             dark_layer = Image.new("RGBA", (W, H), (12, 10, 8, 95))
             base = Image.alpha_composite(base, dark_layer)
         else:
@@ -138,10 +133,10 @@ async def generate_compare_gui(p1_name, p2_name, stats):
     tie_border = (130, 120, 110, 255)
 
     # 1. Pannelli Laterali Giocatori
-    base = draw_rounded_rect(base, [(25, 75), (275, 615)], 20, p1_fill, p1_border, 3)
-    base = draw_rounded_rect(base, [(925, 75), (1175, 615)], 20, p2_fill, p2_border, 3)
+    base = draw_rounded_rect(base, [(25, 75), (275, 605)], 20, p1_fill, p1_border, 3)
+    base = draw_rounded_rect(base, [(925, 75), (1175, 605)], 20, p2_fill, p2_border, 3)
 
-    # 2. Scarica e incolla le Skin 3D (PRIMA dei testi, così non coprono mai le scritte!)
+    # 2. Scarica e incolla le Skin 3D
     skin1 = await get_player_3d_skin(p1_name)
     skin2 = await get_player_3d_skin(p2_name)
 
@@ -152,36 +147,31 @@ async def generate_compare_gui(p1_name, p2_name, stats):
             new_w = min(210, int(skin.width * ratio))
             new_h = int(skin.height * (new_w / skin.width))
             skin_resized = skin.resize((new_w, new_h), Image.Resampling.LANCZOS)
-            # Specchia la skin di destra così i due personaggi si guardano verso il centro
             if idx == 1:
                 skin_resized = skin_resized.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
             sx = box_x1 + (box_x2 - box_x1 - new_w) // 2
-            sy = 185 + (305 - new_h) // 2
+            sy = 180 + (305 - new_h) // 2
             base.paste(skin_resized, (sx, sy), skin_resized)
 
-    # 3. Griglia 3x3 delle Statistiche Centrali (Stile Mineplex)
+    # 3. Griglia 2 Colonne x 4 Righe (8 Box grandi, senza Top 3, Build Recorded e Barra Finale)
     grid_items = [
-        {"title": "Active WRs",       "v1": stats["p1_wr"],     "v2": stats["p2_wr"],     "fmt": "int",  "rev": False},
-        {"title": "Top 3 Podiums",    "v1": stats["p1_top3"],   "v2": stats["p2_top3"],   "fmt": "int",  "rev": False},
-        {"title": "Solo WRs",         "v1": stats["p1_solo"],   "v2": stats["p2_solo"],   "fmt": "int",  "rev": False},
-        {"title": "H2H Wins",         "v1": stats["p1_wins"],   "v2": stats["p2_wins"],   "fmt": "int",  "rev": False},
-        {"title": "H2H Dominance",    "v1": stats["p1_perc"],   "v2": stats["p2_perc"],   "fmt": "perc", "rev": False},
-        {"title": "Tied Records",     "v1": stats["ties"],      "v2": stats["ties"],      "fmt": "int",  "rev": False},
-        {"title": "Fastest Record",   "v1": stats["p1_fast"],   "v2": stats["p2_fast"],   "fmt": "time", "rev": True},
-        {"title": "Avg Best Time",    "v1": stats["p1_avg"],    "v2": stats["p2_avg"],    "fmt": "time", "rev": True},
-        {"title": "Tourney Trophies", "v1": stats["p1_trofei"], "v2": stats["p2_trofei"], "fmt": "int",  "rev": False},
+        {"title": "Active WRs",       "v1": stats["p1_wr"],      "v2": stats["p2_wr"],      "fmt": "int"},
+        {"title": "Solo WRs",         "v1": stats["p1_solo"],    "v2": stats["p2_solo"],    "fmt": "int"},
+        {"title": "Tied WRs",         "v1": stats["p1_tied_wr"], "v2": stats["p2_tied_wr"], "fmt": "int"},
+        {"title": "Tourney Trophies", "v1": stats["p1_trofei"],  "v2": stats["p2_trofei"],  "fmt": "int"},
+        {"title": "H2H Wins",         "v1": stats["p1_wins"],    "v2": stats["p2_wins"],    "fmt": "int"},
+        {"title": "H2H Dominance",    "v1": stats["p1_perc"],    "v2": stats["p2_perc"],    "fmt": "perc"},
+        {"title": "Fastest Record",   "v1": stats["p1_fast"],    "v2": stats["p2_fast"],    "fmt": "time"},
+        {"title": "Avg Best Time",    "v1": stats["p1_avg"],     "v2": stats["p2_avg"],     "fmt": "time"},
     ]
 
-    p1_cat_wins = 0
-    p2_cat_wins = 0
-
     start_x, start_y = 295, 75
-    box_w, box_h = 193, 135
-    gap_x, gap_y = 15, 15
+    box_w, box_h = 295, 121
+    gap_x, gap_y = 20, 15
 
     box_renders = []
     for i, item in enumerate(grid_items):
-        row, col = divmod(i, 3)
+        row, col = divmod(i, 2)
         x1 = start_x + col * (box_w + gap_x)
         y1 = start_y + row * (box_h + gap_y)
         x2, y2 = x1 + box_w, y1 + box_h
@@ -219,10 +209,8 @@ async def generate_compare_gui(p1_name, p2_name, stats):
             v2_str = f"{v2}%" if item["fmt"] == "perc" else str(v2)
 
         if winner == 1:
-            p1_cat_wins += 1
             bfill, bborder, dcol = p1_fill, p1_border, p1_text_col
         elif winner == 2:
-            p2_cat_wins += 1
             bfill, bborder, dcol = p2_fill, p2_border, p2_text_col
         else:
             bfill, bborder, dcol = tie_fill, tie_border, (180, 180, 180)
@@ -230,18 +218,13 @@ async def generate_compare_gui(p1_name, p2_name, stats):
         base = draw_rounded_rect(base, [(x1, y1), (x2, y2)], 16, bfill, bborder, 3)
         box_renders.append((x1, y1, x2, y2, item["title"], v1_str, v2_str, diff_str, dcol))
 
-    # 4. Barra Riepilogativa in Basso (Stile Mineplex)
-    bar_fill = p1_fill if p1_cat_wins > p2_cat_wins else (p2_fill if p2_cat_wins > p1_cat_wins else tie_fill)
-    bar_border = p1_border if p1_cat_wins > p2_cat_wins else (p2_border if p2_cat_wins > p1_cat_wins else tie_border)
-    base = draw_rounded_rect(base, [(295, 530), (905, 615)], 16, bar_fill, bar_border, 3)
-
-    # 5. Disegno di tutti i Testi
+    # 4. Disegno di tutti i Testi
     draw = ImageDraw.Draw(base)
 
     # Titolo in alto
     draw_centered_text(draw, "Stat Comparison · Speed Builders", (W // 2, 35), size=32, color=(255, 200, 70), bold=True)
 
-    # Nomi Player in alto nei box laterali (ridimensiona automaticamente se il nick è lunghissimo)
+    # Nomi Player nei box laterali
     s_p1 = 26 if len(p1_name) <= 12 else 21
     s_p2 = 26 if len(p2_name) <= 12 else 21
     draw_centered_text(draw, p1_name, (150, 115), size=s_p1, color=p1_text_col, bold=True)
@@ -250,23 +233,18 @@ async def generate_compare_gui(p1_name, p2_name, stats):
     # Ruoli / Gradi in basso sotto le skin
     rank1_clean = pulisci_grado(stats["p1_rank"])
     rank2_clean = pulisci_grado(stats["p2_rank"])
-    draw_centered_text(draw, rank1_clean, (150, 540), size=22, color=(255, 215, 0), bold=True)
-    draw_centered_text(draw, f"({stats['p1_wr']} WRs)", (150, 575), size=17, color=(220, 220, 220), bold=False)
+    draw_centered_text(draw, rank1_clean, (150, 530), size=22, color=(255, 215, 0), bold=True)
+    draw_centered_text(draw, f"({stats['p1_wr']} WRs)", (150, 565), size=17, color=(220, 220, 220), bold=False)
 
-    draw_centered_text(draw, rank2_clean, (1050, 540), size=22, color=(255, 215, 0), bold=True)
-    draw_centered_text(draw, f"({stats['p2_wr']} WRs)", (1050, 575), size=17, color=(220, 220, 220), bold=False)
+    draw_centered_text(draw, rank2_clean, (1050, 530), size=22, color=(255, 215, 0), bold=True)
+    draw_centered_text(draw, f"({stats['p2_wr']} WRs)", (1050, 565), size=17, color=(220, 220, 220), bold=False)
 
-    # Testi dentro i 9 Box Centrali
+    # Testi dentro gli 8 Box Centrali
     for (x1, y1, x2, y2, title, v1_str, v2_str, diff_str, dcol) in box_renders:
         cx = (x1 + x2) // 2
-        draw_centered_text(draw, title, (cx, y1 + 28), size=17, color=(235, 235, 235), bold=False)
-        draw_split_values(draw, v1_str, v2_str, (cx, y1 + 68), size=24, c1=p1_text_col, c2=p2_text_col)
-        draw_centered_text(draw, diff_str, (cx, y1 + 108), size=18, color=dcol, bold=True)
-
-    # Testi Barra Finale in Basso
-    draw_centered_text(draw, p1_name, (405, 572), size=22, color=p1_text_col, bold=True)
-    draw_split_values(draw, str(p1_cat_wins), str(p2_cat_wins), (600, 572), size=32, c1=p1_text_col, c2=p2_text_col)
-    draw_centered_text(draw, p2_name, (795, 572), size=22, color=p2_text_col, bold=True)
+        draw_centered_text(draw, title, (cx, y1 + 26), size=19, color=(235, 235, 235), bold=False)
+        draw_split_values(draw, v1_str, v2_str, (cx, y1 + 63), size=27, c1=p1_text_col, c2=p2_text_col)
+        draw_centered_text(draw, diff_str, (cx, y1 + 98), size=18, color=dcol, bold=True)
 
     buffer = io.BytesIO()
     base.save(buffer, format="PNG")
