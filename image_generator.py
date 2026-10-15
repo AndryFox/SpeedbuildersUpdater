@@ -1,4 +1,6 @@
 import io
+import os
+import random
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
@@ -42,14 +44,20 @@ def draw_text_center(draw, text, xy, font_size=24, color=(255, 255, 255), bold=F
 
 async def generate_compare_gui(p1_name, p2_name, stats):
     """Genera l'immagine GUI della sfida."""
-    # Sfondo di base grigio scuro (Puoi sostituirlo mettendo un'immagine bg.jpg nel progetto!)
+    
+    # Cerca in automatico TUTTI i file nella cartella che iniziano con "bg"
+    sfondi_disponibili = [f for f in os.listdir() if f.startswith("bg") and f.lower().endswith((".jpg", ".png", ".jpeg"))]
+    
     try:
-        base = Image.open("bg.jpg").convert("RGBA").resize((1100, 600))
+        if sfondi_disponibili:
+            sfondo_scelto = random.choice(sfondi_disponibili)
+            base = Image.open(sfondo_scelto).convert("RGBA").resize((1100, 600))
+        else:
+            base = Image.new("RGBA", (1100, 600), (35, 39, 42, 255))
     except:
         base = Image.new("RGBA", (1100, 600), (35, 39, 42, 255))
 
-    # Colori dei pannelli
-    color_p1_fill = (255, 85, 85, 90)   # Rosso traslucido
+    color_p1_fill = (255, 85, 85, 90)
     color_p1_out = (255, 85, 85, 255)   # Bordo Rosso
     
     color_p2_fill = (85, 85, 255, 90)   # Blu traslucido
