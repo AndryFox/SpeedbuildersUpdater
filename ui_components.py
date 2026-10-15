@@ -370,12 +370,13 @@ class WRModal(Modal):
         except ValueError: new_time = 0.0
 
         async with database_utils.pool.acquire() as conn:
-            # 1. Se stiamo modificando, eliminiamo prima il record VECCHIO
+            old_date_added = None
+            # 1. Se stiamo modificando, recuperiamo la date_added originale prima di eliminare il record VECCHIO
             if self.is_edit:
                 try: old_t = float(self.original_view.def_t)
                 except ValueError: old_t = 0.0
-                await conn.execute(
-                    "DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3",
+                old_date_added = await conn.fetchval(
+                    "DELETE FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) AND player_name = $2 AND time = $3 RETURNING date_added",
                     self.original_view.def_b.strip(), self.original_view.def_p.strip(), old_t
                 )
 
@@ -403,9 +404,18 @@ class WRModal(Modal):
             for p in players_to_check:
                 old_counts[p] = await get_wr_count(self.bot, p)
 
-            # Inseriamo il record (aggiornato o nuovo)
-            await conn.execute("INSERT INTO WorldRecords (build_name, player_name, time) VALUES ($1, $2, $3)", build_key, current_player, new_time)
-            
+            # Inseriamo il record (mantenendo la date_added originale se era un Edit!)
+            if old_date_added:
+                await conn.execute(
+                    "INSERT INTO WorldRecords (build_name, player_name, time, date_added) VALUES ($1, $2, $3, $4)",
+                    build_key, current_player, new_time, old_date_added
+                )
+            else:
+                await conn.execute(
+                    "INSERT INTO WorldRecords (build_name, player_name, time) VALUES ($1, $2, $3)",
+                    build_key, current_player, new_time
+                )
+                
             new_counts = {}
             for p in players_to_check:
                 new_counts[p] = await get_wr_count(self.bot, p)
