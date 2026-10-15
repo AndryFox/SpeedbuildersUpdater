@@ -6,6 +6,7 @@ import re
 import config
 import database_utils
 import image_generator
+import ui_components
 
 # Importiamo la tua libreria principale!
 import rankings 
@@ -88,35 +89,38 @@ class RankingCommands(commands.Cog):
                     records.append(f"▸ Build: **{row['build_name']}** ⸻ `{row['time']}s`")
                         
         count = len(records)
-        # Recuperiamo le medaglie dalla tabella tourney_hof!
         trophies = await database_utils.get_player_trophies(player_norm)
         
         if count > 0 or trophies:
             ruolo = rankings.get_role_tag(count)
             nome_estetico = rankings.DISPLAY_NAMES_CACHE.get(player_norm, player_norm)
             avatar_url = f"https://minotar.net/helm/{player_norm}/256.png"
+            icon_url = self.bot.user.avatar.url if self.bot.user.avatar else None
             
-            desc = f"**Current Rank:** {ruolo}\n"
+            header_desc = f"**Current Rank:** {ruolo}\n"
             if trophies:
-                desc += f"🏆 **Tourney Trophies:** {' • '.join(trophies)}\n"
-            desc += "\n"
+                header_desc += f"🏆 **Tourney Trophies:** {' • '.join(trophies)}\n"
+            header_desc += "\n"
             
-            embed = discord.Embed(description=desc, color=discord.Color.gold())
-            embed.set_author(name=f"{nome_estetico}'s World Records ({count})", icon_url=avatar_url)
-            embed.set_thumbnail(url=avatar_url)
+            # Dividiamo i record in blocchi da 20 per pagina
+            per_page = 20
+            chunks = [records[i:i + per_page] for i in range(0, len(records), per_page)] if records else [["*No active Build WRs at the moment.*"]]
             
-            if count > 0:
-                lista_formattata = "\n".join(records)
-                if len(lista_formattata) > 3800: 
-                    lista_formattata = lista_formattata[:3800] + "\n\n*... and more!*"
-                embed.description += lista_formattata
-            else:
-                embed.description += "*No active Build WRs at the moment.*"
+            pages = []
+            for chunk in chunks:
+                embed = discord.Embed(description=header_desc + "\n".join(chunk), color=discord.Color.gold())
+                embed.set_author(name=f"{nome_estetico}'s World Records ({count})", icon_url=avatar_url)
+                embed.set_thumbnail(url=avatar_url)
+                embed.set_footer(text="FearGames Speedbuilders", icon_url=icon_url)
+                pages.append(embed)
                 
-            embed.set_footer(text="FearGames Speedbuilders", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
-            await interaction.followup.send(embed=embed)
+            if len(pages) == 1:
+                await interaction.followup.send(embed=pages[0], ephemeral=True)
+            else:
+                await interaction.followup.send(embed=pages[0], view=ui_components.PaginationView(pages), ephemeral=True)
         else:
-            await interaction.followup.send(f"📉 **{player}** has no WRs or Tourney Trophies at the moment.")
+            await interaction.followup.send(f"📉 **{player}** has no WRs or Tourney Trophies at the moment.", ephemeral=True)
+
     @app_commands.command(name="wrssim", description="Check all Sim WRs of a player")
     @app_commands.describe(player="The name of the player")
     @app_commands.autocomplete(player=player_autocomplete)
@@ -159,17 +163,27 @@ class RankingCommands(commands.Cog):
         count = len(records)
         if count > 0:
             avatar_url = f"https://minotar.net/helm/{target_norm}/256.png"
-            embed = discord.Embed(color=discord.Color.green())
-            embed.set_author(name=f"{rankings.DISPLAY_NAMES_CACHE.get(target_norm, target_norm)}'s Sim WRs ({count})", icon_url=avatar_url)
-            embed.set_thumbnail(url=avatar_url)
+            nome_estetico = rankings.DISPLAY_NAMES_CACHE.get(target_norm, target_norm)
+            icon_url = self.bot.user.avatar.url if self.bot.user.avatar else None
             
-            lista_formattata = "\n".join(records)
-            embed.description = lista_formattata[:3900] + "\n\n*... and more!*" if len(lista_formattata) > 3900 else lista_formattata
-            embed.set_footer(text="FearGames Speedbuilders", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            per_page = 20
+            chunks = [records[i:i + per_page] for i in range(0, len(records), per_page)]
+            
+            pages = []
+            for chunk in chunks:
+                embed = discord.Embed(description="\n".join(chunk), color=discord.Color.green())
+                embed.set_author(name=f"{nome_estetico}'s Sim WRs ({count})", icon_url=avatar_url)
+                embed.set_thumbnail(url=avatar_url)
+                embed.set_footer(text="FearGames Speedbuilders", icon_url=icon_url)
+                pages.append(embed)
+                
+            if len(pages) == 1:
+                await interaction.followup.send(embed=pages[0], ephemeral=True)
+            else:
+                await interaction.followup.send(embed=pages[0], view=ui_components.PaginationView(pages), ephemeral=True)
         else:
             await interaction.followup.send(f"📉 **{player.title().replace('_', '\\_')}** has no Sim WRs at the moment.", ephemeral=True)
-
+            
     @app_commands.command(name="buildtimes", description="Check the Top 3 and Sim WR of a build")
     @app_commands.describe(build="The name of the build")
     @app_commands.autocomplete(build=build_autocomplete)
