@@ -1,268 +1,340 @@
-import io
-import os
-import random
+import discord
+from discord import app_commands
+from discord.ext import commands
 import aiohttp
 import re
-import urllib.request
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import config
+import database_utils
+import image_generator
 
-FONT_BOLD_PATH = "Roboto-Black.ttf"
-FONT_REG_PATH = "Roboto-Bold.ttf"
+# Importiamo la tua libreria principale!
+import rankings 
 
-def get_font(size: int, bold: bool = True):
-    """Carica un font vero garantito su Linux (Render), Mac o Windows."""
-    candidates = [
-        FONT_BOLD_PATH if bold else FONT_REG_PATH,
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-        "C:/Windows/Fonts/arialbd.ttf"
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, size)
-            except Exception:
-                pass
+class RankingCommands(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        # Riavvia il loop asincrono per pre-generare la classifica
+        self.bot.loop.create_task(rankings.generate_wr_ranking_text(self.bot))
 
-    try:
-        url = "https://cdn.jsdelivr.net/gh/googlefonts/roboto@main/src/hinted/Roboto-Black.ttf"
-        urllib.request.urlretrieve(url, FONT_BOLD_PATH)
-        return ImageFont.truetype(FONT_BOLD_PATH, size)
-    except Exception:
-        return ImageFont.load_default(size=size)
+    # --- FUNZIONI DI AUTOCOMPLETAMENTO ---
+    async def build_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        async with database_utils.pool.acquire() as conn:
+            if not current:
+                rows = await conn.fetch("SELECT DISTINCT build_name FROM WorldRecords ORDER BY build_name LIMIT 25")
+            else:
+                rows = await conn.fetch("SELECT DISTINCT build_name FROM WorldRecords WHERE build_name ILIKE $1 ORDER BY build_name LIMIT 25", f"%{current}%")
+            return [app_commands.Choice(name=row['build_name'], value=row['build_name']) for row in rows]
 
-async def get_player_3d_skin(player_name: str):
-    """Scarica il render 3D isometrico della skin (con mantello se presente)."""
-    clean_name = player_name.replace("\\", "").strip()
-    urls = [
-        f"https://starlightskins.lunareclipse.studio/render/ultimate/{clean_name}/full",
-        f"https://vzge.me/full/512/{clean_name}.png",
-        f"https://mc-heads.net/body/{clean_name}/400"
-    ]
-    headers = {"User-Agent": "Mozilla/5.0 (SpeedBuildersBot/2.0)"}
-    async with aiohttp.ClientSession(headers=headers) as session:
-        for url in urls:
-            try:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
-                    if resp.status == 200:
-                        data = await resp.read()
-                        img = Image.open(io.BytesIO(data)).convert("RGBA")
-                        bbox = img.getbbox()
-                        if bbox:
-                            img = img.crop(bbox)
-                        return img
-            except Exception:
+    async def player_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        current_lower = current.lower()
+        async with database_utils.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT DISTINCT player_name FROM WorldRecords")
+            hof_rows = await conn.fetch("SELECT primo, secondo, terzo FROM tourney_hof")
+        
+        main_names = {database_utils.get_main_name(row['player_name']) for row in rows}
+        main_names.update(database_utils.ALIASES_CACHE.values())
+        
+        # Aggiungiamo anche i vincitori dei tornei ai suggerimenti!
+        for r in hof_rows:
+            main_names.add(database_utils.get_main_name(r['primo']))
+            main_names.add(database_utils.get_main_name(r['secondo']))
+            main_names.add(database_utils.get_main_name(r['terzo']))
+            
+        choices = [app_commands.Choice(name=name, value=name) for name in main_names if not current_lower or current_lower in name.lower()]
+        return sorted(choices, key=lambda x: x.name.lower())[:25]
+
+    # --- COMANDI ADMIN SETUP ---
+    @app_commands.command(name="setup_rankings", description="Send the initial WR Ranking message")
+    @app_commands.default_permissions(administrator=True)
+    async def setup_rankings(self, interaction: discord.Interaction):
+        if interaction.user.id != config.MIO_ID: return await interaction.response.send_message("❌ Riservato.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        initial_text = await rankings.generate_wr_ranking_text(self.bot)
+        async with aiohttp.ClientSession() as session:
+            webhook = discord.Webhook.from_url(config.RANKINGS_WEBHOOK_URL, session=session)
+            msg = await webhook.send(content=initial_text, username="Rankings Updater", wait=True)
+        await interaction.followup.send(f"✅ Ranking created! Copy ID to config.py:\n**{msg.id}**")
+
+    @app_commands.command(name="setup_rounds", description="Send the initial WR Rounds message")
+    @app_commands.default_permissions(administrator=True)
+    async def setup_rounds(self, interaction: discord.Interaction):
+        if interaction.user.id != config.MIO_ID: return await interaction.response.send_message("❌ Riservato.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        initial_text = "## In total Fear Games have: __140 Builds__\n\nThe Wr rounds **(Legit)** on Fear Games is:\n\n||@Speedbuilders||"
+        async with aiohttp.ClientSession() as session:
+            webhook = discord.Webhook.from_url(config.RANKINGS_WEBHOOK_URL, session=session)
+            msg = await webhook.send(content=initial_text, username="Rankings Updater", wait=True)
+        await interaction.followup.send(f"✅ Rounds created! Copy ID to config.py:\n**{msg.id}**")
+
+    # --- COMANDI STATISTICHE UTENTI ---
+    @app_commands.command(name="wrs", description="Check all WRs and times of a player")
+    @app_commands.describe(player="The name of the player")
+    @app_commands.autocomplete(player=player_autocomplete)
+    async def check_wrs(self, interaction: discord.Interaction, player: str):
+        if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
+            return await interaction.response.send_message(f"⚠ Can only be used in <#{config.SUBMISSION_CHANNEL_ID}>.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        
+        player_norm = database_utils.get_main_name(player.replace("\\", ""))
+        records = []
+        async with database_utils.pool.acquire() as conn:
+            query = """
+                SELECT r1.build_name, r1.time, r1.player_name FROM WorldRecords r1
+                WHERE r1.time = (SELECT MIN(time) FROM WorldRecords r2 WHERE LOWER(r1.build_name) = LOWER(r2.build_name))
+                ORDER BY LOWER(r1.build_name) ASC
+            """
+            for row in await conn.fetch(query):
+                if database_utils.get_main_name(row['player_name']) == player_norm:
+                    records.append(f"▸ Build: **{row['build_name']}** ⸻ `{row['time']}s`")
+                        
+        count = len(records)
+        # Recuperiamo le medaglie dalla tabella tourney_hof!
+        trophies = await database_utils.get_player_trophies(player_norm)
+        
+        if count > 0 or trophies:
+            ruolo = rankings.get_role_tag(count)
+            nome_estetico = rankings.DISPLAY_NAMES_CACHE.get(player_norm, player_norm)
+            avatar_url = f"https://minotar.net/helm/{player_norm}/256.png"
+            
+            desc = f"**Current Rank:** {ruolo}\n"
+            if trophies:
+                desc += f"🏆 **Tourney Trophies:** {' • '.join(trophies)}\n"
+            desc += "\n"
+            
+            embed = discord.Embed(description=desc, color=discord.Color.gold())
+            embed.set_author(name=f"{nome_estetico}'s World Records ({count})", icon_url=avatar_url)
+            embed.set_thumbnail(url=avatar_url)
+            
+            if count > 0:
+                lista_formattata = "\n".join(records)
+                if len(lista_formattata) > 3800: 
+                    lista_formattata = lista_formattata[:3800] + "\n\n*... and more!*"
+                embed.description += lista_formattata
+            else:
+                embed.description += "*No active Build WRs at the moment.*"
+                
+            embed.set_footer(text="FearGames Speedbuilders", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
+            await interaction.followup.send(embed=embed)
+        else:
+            await interaction.followup.send(f"📉 **{player}** has no WRs or Tourney Trophies at the moment.")
+    @app_commands.command(name="wrssim", description="Check all Sim WRs of a player")
+    @app_commands.describe(player="The name of the player")
+    @app_commands.autocomplete(player=player_autocomplete)
+    async def wrssim_cmd(self, interaction: discord.Interaction, player: str):
+        await interaction.response.defer(ephemeral=True)
+        target_norm = database_utils.get_main_name(player.strip()) 
+        target_cmp = target_norm.lower().replace("_", "").replace("\\", "").strip()
+        sim_channel = interaction.client.get_channel(config.SIM_WR_CHANNEL_ID)
+        records = []
+        
+        if sim_channel:
+            async for message in sim_channel.history(limit=500):
+                if not message.content: continue
+                for line in message.content.split('\n'):
+                    raw_line = line.replace("*", "").replace(">", "").strip()
+                    if ":" in raw_line:
+                        try:
+                            build_name, rest_of_line = map(str.strip, raw_line.split(':', 1))
+                            if not rest_of_line: continue
+                            
+                            time_val = ""
+                            player_part = rest_of_line
+                            if "-" in rest_of_line:
+                                time_part, player_part = rest_of_line.split('-', 1)
+                                time_val = time_part.strip().lower().replace("s", "")
+                            
+                            for p in [p.strip() for p in player_part.split('/')]:
+                                clean_p = re.sub(r'`?\(.*?\)`?', '', p)
+                                clean_p = re.sub(r'\[.*?\]', '', clean_p).replace("\\", "").replace("`", "").strip()
+                                
+                                if target_cmp == database_utils.get_main_name(clean_p).lower().replace("_", "").replace("\\", "").strip():
+                                    retime_match = re.search(r'\((retime.*?)\)', p, re.IGNORECASE)
+                                    retime_str = f" - **`{retime_match.group(0)}`**" if retime_match else ""
+                                    
+                                    display_time = time_val or (re.search(r'[\d\.]+', retime_match.group(1)).group(0) if retime_match and re.search(r'[\d\.]+', retime_match.group(1)) else "?")
+                                    records.append(f"▸ Build: **{build_name}** ⸻ `{display_time}s`{retime_str}")
+                                    break
+                        except: continue
+                                
+        count = len(records)
+        if count > 0:
+            avatar_url = f"https://minotar.net/helm/{target_norm}/256.png"
+            embed = discord.Embed(color=discord.Color.green())
+            embed.set_author(name=f"{rankings.DISPLAY_NAMES_CACHE.get(target_norm, target_norm)}'s Sim WRs ({count})", icon_url=avatar_url)
+            embed.set_thumbnail(url=avatar_url)
+            
+            lista_formattata = "\n".join(records)
+            embed.description = lista_formattata[:3900] + "\n\n*... and more!*" if len(lista_formattata) > 3900 else lista_formattata
+            embed.set_footer(text="FearGames Speedbuilders", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.followup.send(f"📉 **{player.title().replace('_', '\\_')}** has no Sim WRs at the moment.", ephemeral=True)
+
+    @app_commands.command(name="buildtimes", description="Check the Top 3 and Sim WR of a build")
+    @app_commands.describe(build="The name of the build")
+    @app_commands.autocomplete(build=build_autocomplete)
+    async def buildtimes_cmd(self, interaction: discord.Interaction, build: str):
+        await interaction.response.defer(ephemeral=True)
+        top3_text = ""
+        top1_norm_name = None
+        
+        async with database_utils.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT player_name, time FROM WorldRecords WHERE LOWER(build_name) = LOWER($1) ORDER BY time ASC", build.strip())
+            
+        if not rows:
+            top3_text = "No official records found."
+        else:
+            top1_norm_name = database_utils.get_main_name(rows[0]['player_name'])
+            best_times, display_names = {}, {}
+            
+            for row in rows:
+                p_name, t_val = row['player_name'], row['time']
+                norm_name = database_utils.get_main_name(p_name)
+                if norm_name not in best_times or t_val < best_times[norm_name]:
+                    best_times[norm_name] = t_val
+                    display_names[norm_name] = p_name 
+            
+            time_groups = {}
+            for p_norm, t in best_times.items():
+                time_groups.setdefault(t, []).append(display_names[p_norm].replace("_", "\\_"))
+                
+            sorted_times = sorted(time_groups.keys())
+            medals = ["🥇 1st", "🥈 2nd", "🥉 3rd"]
+            for i in range(min(3, len(sorted_times))):
+                t = sorted_times[i]
+                top3_text += f"{medals[i]}: **{' / '.join(time_groups[t])}** ({t}s)\n"
+
+        sim_channel = interaction.client.get_channel(config.SIM_WR_CHANNEL_ID)
+        sim_text = "No Sim WRs found for this build."
+        build_clean = build.lower().strip()
+        
+        if sim_channel:
+            async for message in sim_channel.history(limit=500):
+                if not message.content: continue
+                for line in message.content.split('\n'):
+                    raw_line = line.replace("*", "").replace(">", "").replace("`", "").strip()
+                    if raw_line.lower().replace("_", "").startswith((f"{build_clean}:", f"{build_clean} :")):
+                        rest = raw_line.split(":", 1)[1].strip() if ":" in raw_line else raw_line
+                        time_str, players_part = (f"{rest.split('-', 1)[0].strip()}s - ", rest.split("-", 1)[1]) if "-" in rest else ("", rest)
+                            
+                        formatted_players = []
+                        for p in players_part.split("/"):
+                            p = p.strip()
+                            retime_match = re.search(r'(\(retime.*?\))', p, re.IGNORECASE)
+                            retime_text = f"`{retime_match.group(1)}`" if retime_match else ""
+                            p_name = p.replace(retime_match.group(1), "").strip() if retime_match else p.strip()
+                            formatted_players.append(f"**{p_name.replace('_', '\\_')}**{retime_text}")
+                            
+                        sim_text = time_str + " / ".join(formatted_players)
+                        break
+
+        embed = discord.Embed(title=f"⏱️ Build Stats: {build.title()}", color=discord.Color.blue())
+        if top1_norm_name: embed.set_thumbnail(url=f"https://minotar.net/helm/{top1_norm_name}/256.png")
+        embed.add_field(name="🏆 Official Top 3", value=top3_text, inline=False)
+        embed.add_field(name="🔄 Sim WR", value=sim_text, inline=False)
+        embed.set_footer(text="FearGames Speedbuilders", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+# --- COMANDO 4: /compare (TESTA A TESTA CON GUI) ---
+    @app_commands.command(name="compare", description="⚔️ Confronta le statistiche e i tempi di due giocatori")
+    @app_commands.describe(player1="Il primo giocatore", player2="Il secondo giocatore")
+    @app_commands.autocomplete(player1=player_autocomplete, player2=player_autocomplete)
+    async def compare_cmd(self, interaction: discord.Interaction, player1: str, player2: str):
+        if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
+            return await interaction.response.send_message(f"⚠ Can only be used in <#{config.SUBMISSION_CHANNEL_ID}>.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+            
+        p1_norm = database_utils.get_main_name(player1.replace("\\", ""))
+        p2_norm = database_utils.get_main_name(player2.replace("\\", ""))
+        
+        if p1_norm.lower() == p2_norm.lower():
+            return await interaction.followup.send("❌ Devi selezionare due giocatori diversi!", ephemeral=True)
+            
+        p1_wr_count, p2_wr_count = 0, 0
+        p1_solo, p2_solo = 0, 0
+        p1_best, p2_best = {}, {}
+        build_records = {}
+        
+        async with database_utils.pool.acquire() as conn:
+            all_rows = await conn.fetch("SELECT build_name, player_name, time FROM WorldRecords")
+            for row in all_rows:
+                b_name = row['build_name'].lower().strip()
+                m_name = database_utils.get_main_name(row['player_name']).lower()
+                t_val = float(row['time'])
+                
+                build_records.setdefault(b_name, {})
+                if m_name not in build_records[b_name] or t_val < build_records[b_name][m_name]:
+                    build_records[b_name][m_name] = t_val
+                
+                if m_name == p1_norm.lower():
+                    if b_name not in p1_best or t_val < p1_best[b_name]:
+                        p1_best[b_name] = t_val
+                elif m_name == p2_norm.lower():
+                    if b_name not in p2_best or t_val < p2_best[b_name]:
+                        p2_best[b_name] = t_val
+
+        # Calcolo WR Attivi, WR Solitari e WR Condivisi
+        p1_low, p2_low = p1_norm.lower(), p2_norm.lower()
+        for b_name, p_times in build_records.items():
+            if not p_times:
                 continue
-    return Image.new("RGBA", (200, 350), (0, 0, 0, 0))
+            min_t = min(p_times.values())
+            holders = [p for p, t in p_times.items() if t == min_t]
 
-def draw_rounded_rect(img, xy, radius, fill_color, outline_color, outline_width=3):
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    draw.rounded_rectangle(xy, radius=radius, fill=fill_color, outline=outline_color, width=outline_width)
-    return Image.alpha_composite(img, overlay)
+            if p1_low in holders:
+                p1_wr_count += 1
+                if len(holders) == 1:
+                    p1_solo += 1
+            if p2_low in holders:
+                p2_wr_count += 1
+                if len(holders) == 1:
+                    p2_solo += 1
 
-def draw_floor_shadow(img, center_x, center_y, width=130, height=28):
-    """Disegna un'ombra ovale morbida sotto i piedi della skin 3D."""
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    bbox = [
-        center_x - width // 2,
-        center_y - height // 2,
-        center_x + width // 2,
-        center_y + height // 2
-    ]
-    draw.ellipse(bbox, fill=(0, 0, 0, 115))
-    overlay = overlay.filter(ImageFilter.GaussianBlur(radius=4))
-    return Image.alpha_composite(img, overlay)
+        p1_tied_wr = p1_wr_count - p1_solo
+        p2_tied_wr = p2_wr_count - p2_solo
 
-def pulisci_grado(grado_grezzo: str) -> str:
-    match = re.search(r"<@&(\d+)>", str(grado_grezzo))
-    if match:
-        role_id = int(match.group(1))
-        for name, rid in config.ROLE_IDS.items():
-            if rid == role_id:
-                return name
-    return str(grado_grezzo).replace("@", "").replace("<", "").replace(">", "").replace("&", "").strip()
+        # Logica Testa a Testa sulle build in comune
+        common_builds = set(p1_best.keys()).intersection(set(p2_best.keys()))
+        p1_wins, p2_wins, ties = 0, 0, 0
+        for b in common_builds:
+            if p1_best[b] < p2_best[b]: p1_wins += 1
+            elif p2_best[b] < p1_best[b]: p2_wins += 1
+            else: ties += 1
 
-def draw_centered_text(draw, text, xy, size=22, color=(255, 255, 255), bold=True, stroke_w=2):
-    font = get_font(size, bold=bold)
-    text_str = str(text)
-    bbox = draw.textbbox((0, 0), text_str, font=font, stroke_width=stroke_w)
-    w = bbox[2] - bbox[0]
-    h = bbox[3] - bbox[1]
-    x = xy[0] - w / 2 - bbox[0]
-    y = xy[1] - h / 2 - bbox[1]
-    draw.text((x, y), text_str, font=font, fill=color, stroke_width=stroke_w, stroke_fill=(10, 10, 10, 230))
+        tot_decisive = p1_wins + p2_wins
+        p1_perc = round((p1_wins / tot_decisive) * 100) if tot_decisive > 0 else 0
+        p2_perc = round((p2_wins / tot_decisive) * 100) if tot_decisive > 0 else 0
 
-def draw_split_values(draw, v1_str, v2_str, center_xy, size=28, c1=(255, 165, 50), c2=(215, 155, 105)):
-    """Disegna 'Valore1 / Valore2' perfettamente centrato sulla barra '/' con contorno nitido."""
-    font = get_font(size, bold=True)
-    slash = " / "
-    sw = 2
-    b1 = draw.textbbox((0, 0), v1_str, font=font, stroke_width=sw)
-    bs = draw.textbbox((0, 0), slash, font=font, stroke_width=sw)
-    b2 = draw.textbbox((0, 0), v2_str, font=font, stroke_width=sw)
+        # Tempo più veloce e Media migliori tempi
+        p1_fast = round(min(p1_best.values()), 2) if p1_best else 0
+        p2_fast = round(min(p2_best.values()), 2) if p2_best else 0
+        p1_avg = round(sum(p1_best.values()) / len(p1_best), 2) if p1_best else 0
+        p2_avg = round(sum(p2_best.values()) / len(p2_best), 2) if p2_best else 0
 
-    w1, ws, w2 = b1[2] - b1[0], bs[2] - bs[0], b2[2] - b2[0]
-    total_w = w1 + ws + w2
-    h = max(b1[3] - b1[1], bs[3] - bs[1], b2[3] - b2[1])
+        p1_trophies = await database_utils.get_player_trophies(p1_norm)
+        p2_trophies = await database_utils.get_player_trophies(p2_norm)
 
-    start_x = center_xy[0] - total_w / 2
-    y = center_xy[1] - h / 2 - b1[1]
+        stats_data = {
+            'p1_wr': p1_wr_count,      'p2_wr': p2_wr_count,
+            'p1_solo': p1_solo,        'p2_solo': p2_solo,
+            'p1_tied_wr': p1_tied_wr,  'p2_tied_wr': p2_tied_wr,
+            'p1_wins': p1_wins,        'p2_wins': p2_wins,
+            'p1_perc': p1_perc,        'p2_perc': p2_perc,
+            'ties': ties,
+            'p1_fast': p1_fast,        'p2_fast': p2_fast,
+            'p1_avg': p1_avg,          'p2_avg': p2_avg,
+            'p1_trofei': len(p1_trophies),
+            'p2_trofei': len(p2_trophies),
+            'p1_rank': rankings.get_role_tag(p1_wr_count),
+            'p2_rank': rankings.get_role_tag(p2_wr_count),
+        }
 
-    s_col = (10, 10, 10, 230)
-    draw.text((start_x, y), v1_str, font=font, fill=c1, stroke_width=sw, stroke_fill=s_col)
-    draw.text((start_x + w1, y), slash, font=font, fill=(180, 180, 180), stroke_width=sw, stroke_fill=s_col)
-    draw.text((start_x + w1 + ws, y), v2_str, font=font, fill=c2, stroke_width=sw, stroke_fill=s_col)
+        p1_estetico = rankings.DISPLAY_NAMES_CACHE.get(p1_norm, p1_norm).replace("\\", "")
+        p2_estetico = rankings.DISPLAY_NAMES_CACHE.get(p2_norm, p2_norm).replace("\\", "")
 
-async def generate_compare_gui(p1_name, p2_name, stats):
-    W, H = 1200, 640
-    sfondi = [f for f in os.listdir() if f.startswith("bg") and f.lower().endswith((".jpg", ".png", ".jpeg"))]
-    try:
-        if sfondi:
-            bg_img = Image.open(random.choice(sfondi)).convert("RGBA").resize((W, H))
-            # SFOCATURA AUTOMATICA DELLO SFONDO + VELO SCURO PER MASSIMO CONTRASTO
-            bg_img = bg_img.filter(ImageFilter.GaussianBlur(radius=6))
-            dark_layer = Image.new("RGBA", (W, H), (15, 12, 10, 110))
-            base = Image.alpha_composite(bg_img, dark_layer)
-        else:
-            base = Image.new("RGBA", (W, H), (28, 22, 18, 255))
-    except Exception:
-        base = Image.new("RGBA", (W, H), (28, 22, 18, 255))
-
-    # --- PALETTE ARANCIO AMBRA (P1) vs MARRONE BRONZO (P2) ---
-    p1_fill = (165, 75, 15, 145)       # Arancio scuro traslucido
-    p1_border = (255, 150, 40, 255)    # Bordo Arancio Ambra
-    p1_text_col = (255, 170, 60)       # Testo Arancio Chiaro
-
-    p2_fill = (95, 55, 30, 155)        # Marrone Caffè/Bronzo traslucido
-    p2_border = (205, 145, 95, 255)    # Bordo Bronzo/Perla
-    p2_text_col = (230, 175, 125)      # Testo Bronzo Chiaro
-
-    tie_fill = (35, 32, 30, 185)       # Grigio-Marrone scuro per i pareggi
-    tie_border = (130, 120, 110, 255)
-
-    # 1. Pannelli Laterali Giocatori
-    base = draw_rounded_rect(base, [(25, 75), (275, 605)], 20, p1_fill, p1_border, 3)
-    base = draw_rounded_rect(base, [(925, 75), (1175, 605)], 20, p2_fill, p2_border, 3)
-
-    # 2. Scarica e incolla le Skin 3D con Ombra a Terra
-    skin1 = await get_player_3d_skin(p1_name)
-    skin2 = await get_player_3d_skin(p2_name)
-
-    target_h = 270
-    for idx, (skin, box_x1, box_x2) in enumerate([(skin1, 25, 275), (skin2, 925, 1175)]):
-        if skin.height > 0:
-            ratio = target_h / skin.height
-            new_w = min(210, int(skin.width * ratio))
-            new_h = int(skin.height * (new_w / skin.width))
-            skin_resized = skin.resize((new_w, new_h), Image.Resampling.LANCZOS)
-            if idx == 1:
-                skin_resized = skin_resized.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-            sx = box_x1 + (box_x2 - box_x1 - new_w) // 2
-            sy = 185 + (295 - new_h) // 2
-
-            # Disegna l'ombra ovale esattamente sotto i piedi del personaggio
-            center_x = (box_x1 + box_x2) // 2
-            base = draw_floor_shadow(base, center_x, sy + new_h - 6)
-            base.paste(skin_resized, (sx, sy), skin_resized)
-
-    # 3. Griglia 2 Colonne x 4 Righe (8 Box grandi)
-    grid_items = [
-        {"title": "Active WRs",       "v1": stats["p1_wr"],      "v2": stats["p2_wr"],      "fmt": "int"},
-        {"title": "Solo WRs",         "v1": stats["p1_solo"],    "v2": stats["p2_solo"],    "fmt": "int"},
-        {"title": "Tied WRs",         "v1": stats["p1_tied_wr"], "v2": stats["p2_tied_wr"], "fmt": "int"},
-        {"title": "Tourney Trophies", "v1": stats["p1_trofei"],  "v2": stats["p2_trofei"],  "fmt": "int"},
-        {"title": "H2H Wins",         "v1": stats["p1_wins"],    "v2": stats["p2_wins"],    "fmt": "int"},
-        {"title": "H2H Dominance",    "v1": stats["p1_perc"],    "v2": stats["p2_perc"],    "fmt": "perc"},
-        {"title": "Fastest Record",   "v1": stats["p1_fast"],    "v2": stats["p2_fast"],    "fmt": "time"},
-        {"title": "Avg Best Time",    "v1": stats["p1_avg"],     "v2": stats["p2_avg"],     "fmt": "time"},
-    ]
-
-    start_x, start_y = 295, 75
-    box_w, box_h = 295, 121
-    gap_x, gap_y = 20, 15
-
-    box_renders = []
-    for i, item in enumerate(grid_items):
-        row, col = divmod(i, 2)
-        x1 = start_x + col * (box_w + gap_x)
-        y1 = start_y + row * (box_h + gap_y)
-        x2, y2 = x1 + box_w, y1 + box_h
-
-        v1, v2 = item["v1"], item["v2"]
-        winner = 0
-        diff_str = "PARI"
-
-        if item["fmt"] == "time":
-            if v1 > 0 and v2 > 0:
-                if v1 < v2:
-                    winner = 1
-                    diff_str = f"-{round(v2 - v1, 2)}s"
-                elif v2 < v1:
-                    winner = 2
-                    diff_str = f"-{round(v1 - v2, 2)}s"
-            elif v1 > 0:
-                winner = 1
-                diff_str = f"{v1}s"
-            elif v2 > 0:
-                winner = 2
-                diff_str = f"{v2}s"
-            v1_str = f"{v1}s" if v1 > 0 else "N/A"
-            v2_str = f"{v2}s" if v2 > 0 else "N/A"
-        else:
-            if v1 > v2:
-                winner = 1
-                diff_val = v1 - v2
-                diff_str = f"+{diff_val}%" if item["fmt"] == "perc" else f"+{diff_val}"
-            elif v2 > v1:
-                winner = 2
-                diff_val = v2 - v1
-                diff_str = f"+{diff_val}%" if item["fmt"] == "perc" else f"+{diff_val}"
-            v1_str = f"{v1}%" if item["fmt"] == "perc" else str(v1)
-            v2_str = f"{v2}%" if item["fmt"] == "perc" else str(v2)
-
-        if winner == 1:
-            bfill, bborder, dcol = p1_fill, p1_border, p1_text_col
-        elif winner == 2:
-            bfill, bborder, dcol = p2_fill, p2_border, p2_text_col
-        else:
-            bfill, bborder, dcol = tie_fill, tie_border, (185, 185, 185)
-
-        base = draw_rounded_rect(base, [(x1, y1), (x2, y2)], 16, bfill, bborder, 3)
-        box_renders.append((x1, y1, x2, y2, item["title"], v1_str, v2_str, diff_str, dcol))
-
-    # 4. Disegno di tutti i Testi
-    draw = ImageDraw.Draw(base)
-
-    # Titolo in alto
-    draw_centered_text(draw, "Stat Comparison · Speed Builders", (W // 2, 36), size=32, color=(255, 205, 75), bold=True, stroke_w=3)
-
-    # Nomi Player nei box laterali
-    s_p1 = 27 if len(p1_name) <= 12 else 21
-    s_p2 = 27 if len(p2_name) <= 12 else 21
-    draw_centered_text(draw, p1_name, (150, 115), size=s_p1, color=p1_text_col, bold=True, stroke_w=2)
-    draw_centered_text(draw, p2_name, (1050, 115), size=s_p2, color=p2_text_col, bold=True, stroke_w=2)
-
-    # Ruoli / Gradi in basso sotto le skin
-    rank1_clean = pulisci_grado(stats["p1_rank"])
-    rank2_clean = pulisci_grado(stats["p2_rank"])
-    draw_centered_text(draw, rank1_clean, (150, 530), size=22, color=(255, 215, 40), bold=True, stroke_w=2)
-    draw_centered_text(draw, f"({stats['p1_wr']} WRs)", (150, 565), size=17, color=(225, 225, 225), bold=False, stroke_w=2)
-
-    draw_centered_text(draw, rank2_clean, (1050, 530), size=22, color=(255, 215, 40), bold=True, stroke_w=2)
-    draw_centered_text(draw, f"({stats['p2_wr']} WRs)", (1050, 565), size=17, color=(225, 225, 225), bold=False, stroke_w=2)
-
-    # Testi dentro gli 8 Box Centrali
-    for (x1, y1, x2, y2, title, v1_str, v2_str, diff_str, dcol) in box_renders:
-        cx = (x1 + x2) // 2
-        draw_centered_text(draw, title, (cx, y1 + 24), size=18, color=(230, 230, 230), bold=False, stroke_w=2)
-        draw_split_values(draw, v1_str, v2_str, (cx, y1 + 62), size=29, c1=p1_text_col, c2=p2_text_col)
-        draw_centered_text(draw, diff_str, (cx, y1 + 98), size=18, color=dcol, bold=True, stroke_w=2)
-
-    buffer = io.BytesIO()
-    base.save(buffer, format="PNG")
-    buffer.seek(0)
-    return buffer
+        image_buffer = await image_generator.generate_compare_gui(p1_estetico, p2_estetico, stats_data)
+        file = discord.File(fp=image_buffer, filename="compare.png")
+        await interaction.followup.send(file=file, ephemeral=True)
+        
+async def setup(bot):
+    await bot.add_cog(RankingCommands(bot))
