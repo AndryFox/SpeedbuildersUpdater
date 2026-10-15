@@ -545,3 +545,34 @@ class ReviewView(View):
     @discord.ui.button(label="Sim Wr", style=discord.ButtonStyle.secondary, custom_id="review_sim")
     async def sim_wr_btn(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(SimWrModal(interaction.client, self, interaction.message))
+
+# --- VIEW UNIVERSALE PER LA PAGINAZIONE (⬅️ / ➡️) ---
+class PaginationView(View):
+    def __init__(self, pages: list[discord.Embed], timeout: int = 180):
+        super().__init__(timeout=timeout)
+        self.pages = pages
+        self.current_page = 0
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.prev_btn.disabled = (self.current_page == 0)
+        self.next_btn.disabled = (self.current_page >= len(self.pages) - 1)
+        self.page_counter.label = f"Page {self.current_page + 1}/{len(self.pages)}"
+
+    @discord.ui.button(emoji="⬅️", style=discord.ButtonStyle.secondary)
+    async def prev_btn(self, interaction: discord.Interaction, button: Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
+
+    @discord.ui.button(label="Page 1/1", style=discord.ButtonStyle.gray, disabled=True)
+    async def page_counter(self, interaction: discord.Interaction, button: Button):
+        pass
+
+    @discord.ui.button(emoji="➡️", style=discord.ButtonStyle.secondary)
+    async def next_btn(self, interaction: discord.Interaction, button: Button):
+        if self.current_page < len(self.pages) - 1:
+            self.current_page += 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
