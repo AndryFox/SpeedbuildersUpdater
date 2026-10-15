@@ -4,7 +4,7 @@ import random
 import aiohttp
 import re
 import urllib.request
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import config
 
 FONT_BOLD_PATH = "Roboto-Black.ttf"
@@ -63,6 +63,20 @@ def draw_rounded_rect(img, xy, radius, fill_color, outline_color, outline_width=
     draw.rounded_rectangle(xy, radius=radius, fill=fill_color, outline=outline_color, width=outline_width)
     return Image.alpha_composite(img, overlay)
 
+def draw_floor_shadow(img, center_x, center_y, width=130, height=28):
+    """Disegna un'ombra ovale morbida sotto i piedi della skin 3D."""
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    bbox = [
+        center_x - width // 2,
+        center_y - height // 2,
+        center_x + width // 2,
+        center_y + height // 2
+    ]
+    draw.ellipse(bbox, fill=(0, 0, 0, 115))
+    overlay = overlay.filter(ImageFilter.GaussianBlur(radius=4))
+    return Image.alpha_composite(img, overlay)
+
 def pulisci_grado(grado_grezzo: str) -> str:
     match = re.search(r"<@&(\d+)>", str(grado_grezzo))
     if match:
@@ -72,25 +86,24 @@ def pulisci_grado(grado_grezzo: str) -> str:
                 return name
     return str(grado_grezzo).replace("@", "").replace("<", "").replace(">", "").replace("&", "").strip()
 
-def draw_centered_text(draw, text, xy, size=22, color=(255, 255, 255), bold=True, shadow=True):
+def draw_centered_text(draw, text, xy, size=22, color=(255, 255, 255), bold=True, stroke_w=2):
     font = get_font(size, bold=bold)
     text_str = str(text)
-    bbox = draw.textbbox((0, 0), text_str, font=font)
+    bbox = draw.textbbox((0, 0), text_str, font=font, stroke_width=stroke_w)
     w = bbox[2] - bbox[0]
     h = bbox[3] - bbox[1]
     x = xy[0] - w / 2 - bbox[0]
     y = xy[1] - h / 2 - bbox[1]
-    if shadow:
-        draw.text((x + 2, y + 2), text_str, font=font, fill=(0, 0, 0, 210))
-    draw.text((x, y), text_str, font=font, fill=color)
+    draw.text((x, y), text_str, font=font, fill=color, stroke_width=stroke_w, stroke_fill=(10, 10, 10, 230))
 
-def draw_split_values(draw, v1_str, v2_str, center_xy, size=26, c1=(255, 165, 50), c2=(215, 155, 105)):
-    """Disegna 'Valore1 / Valore2' perfettamente centrato sulla barra '/'."""
+def draw_split_values(draw, v1_str, v2_str, center_xy, size=28, c1=(255, 165, 50), c2=(215, 155, 105)):
+    """Disegna 'Valore1 / Valore2' perfettamente centrato sulla barra '/' con contorno nitido."""
     font = get_font(size, bold=True)
     slash = " / "
-    b1 = draw.textbbox((0, 0), v1_str, font=font)
-    bs = draw.textbbox((0, 0), slash, font=font)
-    b2 = draw.textbbox((0, 0), v2_str, font=font)
+    sw = 2
+    b1 = draw.textbbox((0, 0), v1_str, font=font, stroke_width=sw)
+    bs = draw.textbbox((0, 0), slash, font=font, stroke_width=sw)
+    b2 = draw.textbbox((0, 0), v2_str, font=font, stroke_width=sw)
 
     w1, ws, w2 = b1[2] - b1[0], bs[2] - bs[0], b2[2] - b2[0]
     total_w = w1 + ws + w2
@@ -99,48 +112,47 @@ def draw_split_values(draw, v1_str, v2_str, center_xy, size=26, c1=(255, 165, 50
     start_x = center_xy[0] - total_w / 2
     y = center_xy[1] - h / 2 - b1[1]
 
-    draw.text((start_x + 2, y + 2), v1_str, font=font, fill=(0, 0, 0, 210))
-    draw.text((start_x + w1 + 2, y + 2), slash, font=font, fill=(0, 0, 0, 210))
-    draw.text((start_x + w1 + ws + 2, y + 2), v2_str, font=font, fill=(0, 0, 0, 210))
-
-    draw.text((start_x, y), v1_str, font=font, fill=c1)
-    draw.text((start_x + w1, y), slash, font=font, fill=(190, 190, 190))
-    draw.text((start_x + w1 + ws, y), v2_str, font=font, fill=c2)
+    s_col = (10, 10, 10, 230)
+    draw.text((start_x, y), v1_str, font=font, fill=c1, stroke_width=sw, stroke_fill=s_col)
+    draw.text((start_x + w1, y), slash, font=font, fill=(180, 180, 180), stroke_width=sw, stroke_fill=s_col)
+    draw.text((start_x + w1 + ws, y), v2_str, font=font, fill=c2, stroke_width=sw, stroke_fill=s_col)
 
 async def generate_compare_gui(p1_name, p2_name, stats):
     W, H = 1200, 640
     sfondi = [f for f in os.listdir() if f.startswith("bg") and f.lower().endswith((".jpg", ".png", ".jpeg"))]
     try:
         if sfondi:
-            base = Image.open(random.choice(sfondi)).convert("RGBA").resize((W, H))
-            dark_layer = Image.new("RGBA", (W, H), (12, 10, 8, 95))
-            base = Image.alpha_composite(base, dark_layer)
+            bg_img = Image.open(random.choice(sfondi)).convert("RGBA").resize((W, H))
+            # SFOCATURA AUTOMATICA DELLO SFONDO + VELO SCURO PER MASSIMO CONTRASTO
+            bg_img = bg_img.filter(ImageFilter.GaussianBlur(radius=6))
+            dark_layer = Image.new("RGBA", (W, H), (15, 12, 10, 110))
+            base = Image.alpha_composite(bg_img, dark_layer)
         else:
             base = Image.new("RGBA", (W, H), (28, 22, 18, 255))
     except Exception:
         base = Image.new("RGBA", (W, H), (28, 22, 18, 255))
 
     # --- PALETTE ARANCIO AMBRA (P1) vs MARRONE BRONZO (P2) ---
-    p1_fill = (165, 75, 15, 135)       # Arancio scuro traslucido
+    p1_fill = (165, 75, 15, 145)       # Arancio scuro traslucido
     p1_border = (255, 150, 40, 255)    # Bordo Arancio Ambra
-    p1_text_col = (255, 165, 55)       # Testo Arancio Chiaro
+    p1_text_col = (255, 170, 60)       # Testo Arancio Chiaro
 
-    p2_fill = (95, 55, 30, 145)        # Marrone Caffè/Bronzo traslucido
-    p2_border = (195, 135, 85, 255)    # Bordo Bronzo/Perla
-    p2_text_col = (225, 170, 120)      # Testo Bronzo Chiaro
+    p2_fill = (95, 55, 30, 155)        # Marrone Caffè/Bronzo traslucido
+    p2_border = (205, 145, 95, 255)    # Bordo Bronzo/Perla
+    p2_text_col = (230, 175, 125)      # Testo Bronzo Chiaro
 
-    tie_fill = (40, 35, 32, 175)       # Grigio-Marrone neutro per i pareggi
+    tie_fill = (35, 32, 30, 185)       # Grigio-Marrone scuro per i pareggi
     tie_border = (130, 120, 110, 255)
 
     # 1. Pannelli Laterali Giocatori
     base = draw_rounded_rect(base, [(25, 75), (275, 605)], 20, p1_fill, p1_border, 3)
     base = draw_rounded_rect(base, [(925, 75), (1175, 605)], 20, p2_fill, p2_border, 3)
 
-    # 2. Scarica e incolla le Skin 3D
+    # 2. Scarica e incolla le Skin 3D con Ombra a Terra
     skin1 = await get_player_3d_skin(p1_name)
     skin2 = await get_player_3d_skin(p2_name)
 
-    target_h = 275
+    target_h = 270
     for idx, (skin, box_x1, box_x2) in enumerate([(skin1, 25, 275), (skin2, 925, 1175)]):
         if skin.height > 0:
             ratio = target_h / skin.height
@@ -150,10 +162,14 @@ async def generate_compare_gui(p1_name, p2_name, stats):
             if idx == 1:
                 skin_resized = skin_resized.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
             sx = box_x1 + (box_x2 - box_x1 - new_w) // 2
-            sy = 180 + (305 - new_h) // 2
+            sy = 185 + (295 - new_h) // 2
+
+            # Disegna l'ombra ovale esattamente sotto i piedi del personaggio
+            center_x = (box_x1 + box_x2) // 2
+            base = draw_floor_shadow(base, center_x, sy + new_h - 6)
             base.paste(skin_resized, (sx, sy), skin_resized)
 
-    # 3. Griglia 2 Colonne x 4 Righe (8 Box grandi, senza Top 3, Build Recorded e Barra Finale)
+    # 3. Griglia 2 Colonne x 4 Righe (8 Box grandi)
     grid_items = [
         {"title": "Active WRs",       "v1": stats["p1_wr"],      "v2": stats["p2_wr"],      "fmt": "int"},
         {"title": "Solo WRs",         "v1": stats["p1_solo"],    "v2": stats["p2_solo"],    "fmt": "int"},
@@ -213,7 +229,7 @@ async def generate_compare_gui(p1_name, p2_name, stats):
         elif winner == 2:
             bfill, bborder, dcol = p2_fill, p2_border, p2_text_col
         else:
-            bfill, bborder, dcol = tie_fill, tie_border, (180, 180, 180)
+            bfill, bborder, dcol = tie_fill, tie_border, (185, 185, 185)
 
         base = draw_rounded_rect(base, [(x1, y1), (x2, y2)], 16, bfill, bborder, 3)
         box_renders.append((x1, y1, x2, y2, item["title"], v1_str, v2_str, diff_str, dcol))
@@ -222,29 +238,29 @@ async def generate_compare_gui(p1_name, p2_name, stats):
     draw = ImageDraw.Draw(base)
 
     # Titolo in alto
-    draw_centered_text(draw, "Stat Comparison · Speed Builders", (W // 2, 35), size=32, color=(255, 200, 70), bold=True)
+    draw_centered_text(draw, "Stat Comparison · Speed Builders", (W // 2, 36), size=32, color=(255, 205, 75), bold=True, stroke_w=3)
 
     # Nomi Player nei box laterali
-    s_p1 = 26 if len(p1_name) <= 12 else 21
-    s_p2 = 26 if len(p2_name) <= 12 else 21
-    draw_centered_text(draw, p1_name, (150, 115), size=s_p1, color=p1_text_col, bold=True)
-    draw_centered_text(draw, p2_name, (1050, 115), size=s_p2, color=p2_text_col, bold=True)
+    s_p1 = 27 if len(p1_name) <= 12 else 21
+    s_p2 = 27 if len(p2_name) <= 12 else 21
+    draw_centered_text(draw, p1_name, (150, 115), size=s_p1, color=p1_text_col, bold=True, stroke_w=2)
+    draw_centered_text(draw, p2_name, (1050, 115), size=s_p2, color=p2_text_col, bold=True, stroke_w=2)
 
     # Ruoli / Gradi in basso sotto le skin
     rank1_clean = pulisci_grado(stats["p1_rank"])
     rank2_clean = pulisci_grado(stats["p2_rank"])
-    draw_centered_text(draw, rank1_clean, (150, 530), size=22, color=(255, 215, 0), bold=True)
-    draw_centered_text(draw, f"({stats['p1_wr']} WRs)", (150, 565), size=17, color=(220, 220, 220), bold=False)
+    draw_centered_text(draw, rank1_clean, (150, 530), size=22, color=(255, 215, 40), bold=True, stroke_w=2)
+    draw_centered_text(draw, f"({stats['p1_wr']} WRs)", (150, 565), size=17, color=(225, 225, 225), bold=False, stroke_w=2)
 
-    draw_centered_text(draw, rank2_clean, (1050, 530), size=22, color=(255, 215, 0), bold=True)
-    draw_centered_text(draw, f"({stats['p2_wr']} WRs)", (1050, 565), size=17, color=(220, 220, 220), bold=False)
+    draw_centered_text(draw, rank2_clean, (1050, 530), size=22, color=(255, 215, 40), bold=True, stroke_w=2)
+    draw_centered_text(draw, f"({stats['p2_wr']} WRs)", (1050, 565), size=17, color=(225, 225, 225), bold=False, stroke_w=2)
 
     # Testi dentro gli 8 Box Centrali
     for (x1, y1, x2, y2, title, v1_str, v2_str, diff_str, dcol) in box_renders:
         cx = (x1 + x2) // 2
-        draw_centered_text(draw, title, (cx, y1 + 26), size=19, color=(235, 235, 235), bold=False)
-        draw_split_values(draw, v1_str, v2_str, (cx, y1 + 63), size=27, c1=p1_text_col, c2=p2_text_col)
-        draw_centered_text(draw, diff_str, (cx, y1 + 98), size=18, color=dcol, bold=True)
+        draw_centered_text(draw, title, (cx, y1 + 24), size=18, color=(230, 230, 230), bold=False, stroke_w=2)
+        draw_split_values(draw, v1_str, v2_str, (cx, y1 + 62), size=29, c1=p1_text_col, c2=p2_text_col)
+        draw_centered_text(draw, diff_str, (cx, y1 + 98), size=18, color=dcol, bold=True, stroke_w=2)
 
     buffer = io.BytesIO()
     base.save(buffer, format="PNG")
