@@ -235,7 +235,7 @@ class RankingCommands(commands.Cog):
         embed.set_footer(text="FearGames Speedbuilders", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-# --- COMANDO 4: /compare (TESTA A TESTA) ---
+# --- COMANDO 4: /compare (TESTA A TESTA CON GUI) ---
     @app_commands.command(name="compare", description="⚔️ Confronta le statistiche e i tempi di due giocatori")
     @app_commands.describe(player1="Il primo giocatore", player2="Il secondo giocatore")
     @app_commands.autocomplete(player1=player_autocomplete, player2=player_autocomplete)
@@ -250,28 +250,21 @@ class RankingCommands(commands.Cog):
         if p1_norm.lower() == p2_norm.lower():
             return await interaction.followup.send("❌ Devi selezionare due giocatori diversi!", ephemeral=True)
             
-        p1_wr_count = 0
-        p2_wr_count = 0
-        p1_best = {}
-        p2_best = {}
+        p1_wr_count, p2_wr_count = 0, 0
+        p1_solo, p2_solo = 0, 0
+        p1_best, p2_best = {}, {}
+        build_records = {}
         
         async with database_utils.pool.acquire() as conn:
-            # 1. Conta i WR attivi di entrambi
-            wr_query = """
-                SELECT r1.build_name, r1.time, r1.player_name FROM WorldRecords r1
-                WHERE r1.time = (SELECT MIN(time) FROM WorldRecords r2 WHERE LOWER(r1.build_name) = LOWER(r2.build_name))
-            """
-            for row in await conn.fetch(wr_query):
-                main_p = database_utils.get_main_name(row['player_name']).lower()
-                if main_p == p1_norm.lower(): p1_wr_count += 1
-                if main_p == p2_norm.lower(): p2_wr_count += 1
-                
-            # 2. Raccoglie i record personali assoluti su OGNI build per calcolare il Testa a Testa
             all_rows = await conn.fetch("SELECT build_name, player_name, time FROM WorldRecords")
             for row in all_rows:
                 b_name = row['build_name'].lower().strip()
                 m_name = database_utils.get_main_name(row['player_name']).lower()
-                t_val = row['time']
+                t_val = float(row['time'])
+                
+                build_records.setdefault(b_name, {})
+                if m_name not in build_records[b_name] or t_val < build_records[b_name][m_name]:
+                    build_records[b_name][m_name] = t_val
                 
                 if m_name == p1_norm.lower():
                     if b_name not in p1_best or t_val < p1_best[b_name]:
@@ -280,48 +273,67 @@ class RankingCommands(commands.Cog):
                     if b_name not in p2_best or t_val < p2_best[b_name]:
                         p2_best[b_name] = t_val
 
-        # --- LOGICA TESTA A TESTA ---
+        # Calcolo WR Attivi, WR Solitari e WR Condivisi
+        p1_low, p2_low = p1_norm.lower(), p2_norm.lower()
+        for b_name, p_times in build_records.items():
+            if not p_times:
+                continue
+            min_t = min(p_times.values())
+            holders = [p for p, t in p_times.items() if t == min_t]
+
+            if p1_low in holders:
+                p1_wr_count += 1
+                if len(holders) == 1:
+                    p1_solo += 1
+            if p2_low in holders:
+                p2_wr_count += 1
+                if len(holders) == 1:
+                    p2_solo += 1
+
+        p1_tied_wr = p1_wr_count - p1_solo
+        p2_tied_wr = p2_wr_count - p2_solo
+
+        # Logica Testa a Testa sulle build in comune
         common_builds = set(p1_best.keys()).intersection(set(p2_best.keys()))
-        p1_wins = 0
-        p2_wins = 0
-        ties = 0
-        
+        p1_wins, p2_wins, ties = 0, 0, 0
         for b in common_builds:
             if p1_best[b] < p2_best[b]: p1_wins += 1
             elif p2_best[b] < p1_best[b]: p2_wins += 1
             else: ties += 1
-            
-        # --- TROFEI ---
+
+        tot_decisive = p1_wins + p2_wins
+        p1_perc = round((p1_wins / tot_decisive) * 100) if tot_decisive > 0 else 0
+        p2_perc = round((p2_wins / tot_decisive) * 100) if tot_decisive > 0 else 0
+
+        # Tempo più veloce e Media migliori tempi
+        p1_fast = round(min(p1_best.values()), 2) if p1_best else 0
+        p2_fast = round(min(p2_best.values()), 2) if p2_best else 0
+        p1_avg = round(sum(p1_best.values()) / len(p1_best), 2) if p1_best else 0
+        p2_avg = round(sum(p2_best.values()) / len(p2_best), 2) if p2_best else 0
+
         p1_trophies = await database_utils.get_player_trophies(p1_norm)
         p2_trophies = await database_utils.get_player_trophies(p2_norm)
-        
-        # --- CALCOLO PERCENTUALE DOMINIO ---
-        tot_scontri = p1_wins + p2_wins
-        p1_perc = round((p1_wins / tot_scontri) * 100) if tot_scontri > 0 else 0
-        p2_perc = round((p2_wins / tot_scontri) * 100) if tot_scontri > 0 else 0
 
-        # --- PREPARIAMO I DATI PER L'IMMAGINE ---
         stats_data = {
-            'p1_wr': p1_wr_count,
-            'p2_wr': p2_wr_count,
-            'p1_wins': p1_wins,
-            'p2_wins': p2_wins,
+            'p1_wr': p1_wr_count,      'p2_wr': p2_wr_count,
+            'p1_solo': p1_solo,        'p2_solo': p2_solo,
+            'p1_tied_wr': p1_tied_wr,  'p2_tied_wr': p2_tied_wr,
+            'p1_wins': p1_wins,        'p2_wins': p2_wins,
+            'p1_perc': p1_perc,        'p2_perc': p2_perc,
             'ties': ties,
+            'p1_fast': p1_fast,        'p2_fast': p2_fast,
+            'p1_avg': p1_avg,          'p2_avg': p2_avg,
             'p1_trofei': len(p1_trophies),
             'p2_trofei': len(p2_trophies),
             'p1_rank': rankings.get_role_tag(p1_wr_count),
             'p2_rank': rankings.get_role_tag(p2_wr_count),
-            'p1_perc': p1_perc,
-            'p2_perc': p2_perc
         }
-        
-        # --- GENERIAMO L'IMMAGINE GUI ---
-        p1_estetico = rankings.DISPLAY_NAMES_CACHE.get(p1_norm, p1_norm)
-        p2_estetico = rankings.DISPLAY_NAMES_CACHE.get(p2_norm, p2_norm)
-        
+
+        p1_estetico = rankings.DISPLAY_NAMES_CACHE.get(p1_norm, p1_norm).replace("\\", "")
+        p2_estetico = rankings.DISPLAY_NAMES_CACHE.get(p2_norm, p2_norm).replace("\\", "")
+
         image_buffer = await image_generator.generate_compare_gui(p1_estetico, p2_estetico, stats_data)
         file = discord.File(fp=image_buffer, filename="compare.png")
-        
         await interaction.followup.send(file=file, ephemeral=True)
         
 async def setup(bot):
