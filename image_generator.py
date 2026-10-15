@@ -7,164 +7,266 @@ import urllib.request
 from PIL import Image, ImageDraw, ImageFont
 import config
 
-# --- SCARICA UN FONT PROFESSIONALE SE MANCA SUL SERVER (RENDER) ---
-FONT_PATH = "Montserrat-Black.ttf"
-def ensure_font():
-    if not os.path.exists(FONT_PATH):
-        try:
-            # Scarica un font spesso, moderno e leggibilissimo
-            url = "https://github.com/google/fonts/raw/main/ofl/montserrat/Montserrat-Black.ttf"
-            urllib.request.urlretrieve(url, FONT_PATH)
-        except Exception as e:
-            print(f"Errore download font: {e}")
+FONT_BOLD_PATH = "Roboto-Black.ttf"
+FONT_REG_PATH = "Roboto-Bold.ttf"
 
-async def get_player_body(player_name: str):
-    """Scarica il render 3D del corpo del giocatore da Minotar."""
-    url = f"https://minotar.net/armor/body/{player_name}/300.png"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status == 200:
-                data = await resp.read()
-                return Image.open(io.BytesIO(data)).convert("RGBA")
-    # Immagine vuota se non trova la skin
-    return Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+def get_font(size: int, bold: bool = True):
+    """Carica un font vero garantito su Linux (Render), Mac o Windows."""
+    candidates = [
+        FONT_BOLD_PATH if bold else FONT_REG_PATH,
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "C:/Windows/Fonts/arialbd.ttf"
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                pass
 
-def draw_rounded_rect(img, xy, radius, fill_color, outline_color, outline_width=4):
-    """Disegna un rettangolo traslucido arrotondato."""
-    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    # Se non trova nulla in locale, scarica da CDN diretto affidabile
+    try:
+        url = "https://cdn.jsdelivr.net/gh/googlefonts/roboto@main/src/hinted/Roboto-Black.ttf"
+        urllib.request.urlretrieve(url, FONT_BOLD_PATH)
+        return ImageFont.truetype(FONT_BOLD_PATH, size)
+    except Exception:
+        return ImageFont.load_default(size=size)
+
+async def get_player_3d_skin(player_name: str):
+    """Scarica il render 3D isometrico della skin (con mantello se presente)."""
+    clean_name = player_name.replace("\\", "").strip()
+    urls = [
+        f"https://starlightskins.lunareclipse.studio/render/ultimate/{clean_name}/full",
+        f"https://vzge.me/full/512/{clean_name}.png",
+        f"https://mc-heads.net/body/{clean_name}/400"
+    ]
+    headers = {"User-Agent": "Mozilla/5.0 (SpeedBuildersBot/2.0)"}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        for url in urls:
+            try:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+                    if resp.status == 200:
+                        data = await resp.read()
+                        img = Image.open(io.BytesIO(data)).convert("RGBA")
+                        # Ritaglia eventuale spazio trasparente in eccesso attorno al personaggio
+                        bbox = img.getbbox()
+                        if bbox:
+                            img = img.crop(bbox)
+                        return img
+            except Exception:
+                continue
+    return Image.new("RGBA", (200, 350), (0, 0, 0, 0))
+
+def draw_rounded_rect(img, xy, radius, fill_color, outline_color, outline_width=3):
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     draw.rounded_rectangle(xy, radius=radius, fill=fill_color, outline=outline_color, width=outline_width)
     return Image.alpha_composite(img, overlay)
 
 def pulisci_grado(grado_grezzo: str) -> str:
-    """Traduce l'ID del ruolo Discord nel nome reale leggendo il config."""
-    match = re.search(r'<@&(\d+)>', grado_grezzo)
+    match = re.search(r"<@&(\d+)>", str(grado_grezzo))
     if match:
         role_id = int(match.group(1))
         for name, rid in config.ROLE_IDS.items():
             if rid == role_id:
-                return name.upper()
-    return grado_grezzo.replace("@", "").replace("<", "").replace(">", "").replace("&", "").strip().upper()
+                return name
+    return str(grado_grezzo).replace("@", "").replace("<", "").replace(">", "").replace("&", "").strip()
 
-def draw_text_with_shadow(draw, text, xy, font_size=24, color=(255, 255, 255), outline_color=(0, 0, 0)):
-    """Disegna un testo spesso con un contorno/ombra scura spessa per far risaltare tutto."""
-    ensure_font()
-    try:
-        font = ImageFont.truetype(FONT_PATH, font_size)
-    except:
-        font = ImageFont.load_default()
-    
-    try:
-        bbox = font.getbbox(text)
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
-    except AttributeError:
-        w, h = draw.textsize(text, font=font)
-        
-    x = xy[0] - (w / 2)
-    y = xy[1] - (h / 2) - (font_size / 4)
-    
-    # Bordo spesso (Outline)
-    o = 2
-    draw.text((x-o, y-o), text, font=font, fill=outline_color)
-    draw.text((x+o, y-o), text, font=font, fill=outline_color)
-    draw.text((x-o, y+o), text, font=font, fill=outline_color)
-    draw.text((x+o, y+o), text, font=font, fill=outline_color)
-    # Ombra inferiore
-    draw.text((x, y+o+1), text, font=font, fill=outline_color)
-    
-    # Testo centrale colorato
-    draw.text((x, y), text, font=font, fill=color)
+def draw_centered_text(draw, text, xy, size=22, color=(255, 255, 255), bold=True, shadow=True):
+    font = get_font(size, bold=bold)
+    text_str = str(text)
+    bbox = draw.textbbox((0, 0), text_str, font=font)
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+    x = xy[0] - w / 2 - bbox[0]
+    y = xy[1] - h / 2 - bbox[1]
+    if shadow:
+        draw.text((x + 2, y + 2), text_str, font=font, fill=(0, 0, 0, 210))
+    draw.text((x, y), text_str, font=font, fill=color)
+
+def draw_split_values(draw, v1_str, v2_str, center_xy, size=24, c1=(255, 165, 50), c2=(215, 155, 105)):
+    """Disegna 'Valore1 / Valore2' perfettamente centrato sulla barra '/'."""
+    font = get_font(size, bold=True)
+    slash = " / "
+    b1 = draw.textbbox((0, 0), v1_str, font=font)
+    bs = draw.textbbox((0, 0), slash, font=font)
+    b2 = draw.textbbox((0, 0), v2_str, font=font)
+
+    w1, ws, w2 = b1[2] - b1[0], bs[2] - bs[0], b2[2] - b2[0]
+    total_w = w1 + ws + w2
+    h = max(b1[3] - b1[1], bs[3] - bs[1], b2[3] - b2[1])
+
+    start_x = center_xy[0] - total_w / 2
+    y = center_xy[1] - h / 2 - b1[1]
+
+    # Ombra
+    draw.text((start_x + 2, y + 2), v1_str, font=font, fill=(0, 0, 0, 210))
+    draw.text((start_x + w1 + 2, y + 2), slash, font=font, fill=(0, 0, 0, 210))
+    draw.text((start_x + w1 + ws + 2, y + 2), v2_str, font=font, fill=(0, 0, 0, 210))
+
+    # Testo colorato
+    draw.text((start_x, y), v1_str, font=font, fill=c1)
+    draw.text((start_x + w1, y), slash, font=font, fill=(190, 190, 190))
+    draw.text((start_x + w1 + ws, y), v2_str, font=font, fill=c2)
 
 async def generate_compare_gui(p1_name, p2_name, stats):
-    """Genera l'immagine GUI della sfida con lo stile del mockup."""
-    sfondi_disponibili = [f for f in os.listdir() if f.startswith("bg") and f.lower().endswith((".jpg", ".png", ".jpeg"))]
+    W, H = 1200, 650
+    sfondi = [f for f in os.listdir() if f.startswith("bg") and f.lower().endswith((".jpg", ".png", ".jpeg"))]
     try:
-        if sfondi_disponibili:
-            sfondo_scelto = random.choice(sfondi_disponibili)
-            base = Image.open(sfondo_scelto).convert("RGBA").resize((1100, 600))
+        if sfondi:
+            base = Image.open(random.choice(sfondi)).convert("RGBA").resize((W, H))
+            # Velo scuro leggero sullo sfondo per far risaltare i box
+            dark_layer = Image.new("RGBA", (W, H), (12, 10, 8, 95))
+            base = Image.alpha_composite(base, dark_layer)
         else:
-            base = Image.new("RGBA", (1100, 600), (40, 40, 40, 255))
-    except:
-        base = Image.new("RGBA", (1100, 600), (40, 40, 40, 255))
+            base = Image.new("RGBA", (W, H), (28, 22, 18, 255))
+    except Exception:
+        base = Image.new("RGBA", (W, H), (28, 22, 18, 255))
 
-    # --- COLORI FEDELI AL TUO MOCKUP ---
-    color_p1_fill = (180, 0, 0, 110)     # Rosso Traslucido
-    color_p1_out = (255, 60, 60, 255)    # Bordo Rosso Vivo
-    
-    color_p2_fill = (0, 70, 180, 110)    # Blu Traslucido
-    color_p2_out = (80, 180, 255, 255)   # Bordo Azzurro
-    
-    color_mid_fill = (25, 27, 30, 220)   # Grigio scurissimo
-    color_mid_out = (120, 130, 140, 255) # Bordo grigio
+    # --- PALETTE ARANCIO AMBRA (P1) vs MARRONE BRONZO (P2) ---
+    p1_fill = (165, 75, 15, 135)       # Arancio scuro traslucido
+    p1_border = (255, 150, 40, 255)    # Bordo Arancio Ambra
+    p1_text_col = (255, 165, 55)       # Testo Arancio Chiaro
 
-    # 1. Box laterali dei Player
-    base = draw_rounded_rect(base, [(30, 90), (310, 570)], 20, color_p1_fill, color_p1_out, outline_width=4)
-    base = draw_rounded_rect(base, [(790, 90), (1070, 570)], 20, color_p2_fill, color_p2_out, outline_width=4)
+    p2_fill = (95, 55, 30, 145)        # Marrone Caffè/Bronzo traslucido
+    p2_border = (195, 135, 85, 255)    # Bordo Bronzo/Perla
+    p2_text_col = (225, 170, 120)      # Testo Bronzo Chiaro
 
-    # 2. Box Centrali
-    boxes = [
-        {"y": 100, "title": "World Records Attivi", "v1": str(stats['p1_wr']), "v2": str(stats['p2_wr'])},
-        {"y": 190, "title": "Scontri Diretti Vinti", "v1": str(stats['p1_wins']), "v2": str(stats['p2_wins'])},
-        {"y": 280, "title": "Trofei Tornei", "v1": str(stats['p1_trofei']), "v2": str(stats['p2_trofei'])},
-        {"y": 370, "title": "Record Pareggiati", "v1": str(stats['ties']), "v2": str(stats['ties'])},
-        {"y": 460, "title": "Dominio Testa a Testa", "v1": f"{stats['p1_perc']}%", "v2": f"{stats['p2_perc']}%"}
+    tie_fill = (40, 35, 32, 175)       # Grigio-Marrone neutro per i pareggi
+    tie_border = (130, 120, 110, 255)
+
+    # 1. Pannelli Laterali Giocatori
+    base = draw_rounded_rect(base, [(25, 75), (275, 615)], 20, p1_fill, p1_border, 3)
+    base = draw_rounded_rect(base, [(925, 75), (1175, 615)], 20, p2_fill, p2_border, 3)
+
+    # 2. Scarica e incolla le Skin 3D (PRIMA dei testi, così non coprono mai le scritte!)
+    skin1 = await get_player_3d_skin(p1_name)
+    skin2 = await get_player_3d_skin(p2_name)
+
+    target_h = 275
+    for idx, (skin, box_x1, box_x2) in enumerate([(skin1, 25, 275), (skin2, 925, 1175)]):
+        if skin.height > 0:
+            ratio = target_h / skin.height
+            new_w = min(210, int(skin.width * ratio))
+            new_h = int(skin.height * (new_w / skin.width))
+            skin_resized = skin.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            # Specchia la skin di destra così i due personaggi si guardano verso il centro
+            if idx == 1:
+                skin_resized = skin_resized.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+            sx = box_x1 + (box_x2 - box_x1 - new_w) // 2
+            sy = 185 + (305 - new_h) // 2
+            base.paste(skin_resized, (sx, sy), skin_resized)
+
+    # 3. Griglia 3x3 delle Statistiche Centrali (Stile Mineplex)
+    grid_items = [
+        {"title": "Active WRs",       "v1": stats["p1_wr"],     "v2": stats["p2_wr"],     "fmt": "int",  "rev": False},
+        {"title": "Top 3 Podiums",    "v1": stats["p1_top3"],   "v2": stats["p2_top3"],   "fmt": "int",  "rev": False},
+        {"title": "Solo WRs",         "v1": stats["p1_solo"],   "v2": stats["p2_solo"],   "fmt": "int",  "rev": False},
+        {"title": "H2H Wins",         "v1": stats["p1_wins"],   "v2": stats["p2_wins"],   "fmt": "int",  "rev": False},
+        {"title": "H2H Dominance",    "v1": stats["p1_perc"],   "v2": stats["p2_perc"],   "fmt": "perc", "rev": False},
+        {"title": "Tied Records",     "v1": stats["ties"],      "v2": stats["ties"],      "fmt": "int",  "rev": False},
+        {"title": "Fastest Record",   "v1": stats["p1_fast"],   "v2": stats["p2_fast"],   "fmt": "time", "rev": True},
+        {"title": "Avg Best Time",    "v1": stats["p1_avg"],    "v2": stats["p2_avg"],    "fmt": "time", "rev": True},
+        {"title": "Tourney Trophies", "v1": stats["p1_trofei"], "v2": stats["p2_trofei"], "fmt": "int",  "rev": False},
     ]
-    
-    for box in boxes:
-        base = draw_rounded_rect(base, [(340, box['y']), (760, box['y'] + 80)], 20, color_mid_fill, color_mid_out, outline_width=3)
 
+    p1_cat_wins = 0
+    p2_cat_wins = 0
+
+    start_x, start_y = 295, 75
+    box_w, box_h = 193, 135
+    gap_x, gap_y = 15, 15
+
+    box_renders = []
+    for i, item in enumerate(grid_items):
+        row, col = divmod(i, 3)
+        x1 = start_x + col * (box_w + gap_x)
+        y1 = start_y + row * (box_h + gap_y)
+        x2, y2 = x1 + box_w, y1 + box_h
+
+        v1, v2 = item["v1"], item["v2"]
+        winner = 0
+        diff_str = "PARI"
+
+        if item["fmt"] == "time":
+            if v1 > 0 and v2 > 0:
+                if v1 < v2:
+                    winner = 1
+                    diff_str = f"-{round(v2 - v1, 2)}s"
+                elif v2 < v1:
+                    winner = 2
+                    diff_str = f"-{round(v1 - v2, 2)}s"
+            elif v1 > 0:
+                winner = 1
+                diff_str = f"{v1}s"
+            elif v2 > 0:
+                winner = 2
+                diff_str = f"{v2}s"
+            v1_str = f"{v1}s" if v1 > 0 else "N/A"
+            v2_str = f"{v2}s" if v2 > 0 else "N/A"
+        else:
+            if v1 > v2:
+                winner = 1
+                diff_val = v1 - v2
+                diff_str = f"+{diff_val}%" if item["fmt"] == "perc" else f"+{diff_val}"
+            elif v2 > v1:
+                winner = 2
+                diff_val = v2 - v1
+                diff_str = f"+{diff_val}%" if item["fmt"] == "perc" else f"+{diff_val}"
+            v1_str = f"{v1}%" if item["fmt"] == "perc" else str(v1)
+            v2_str = f"{v2}%" if item["fmt"] == "perc" else str(v2)
+
+        if winner == 1:
+            p1_cat_wins += 1
+            bfill, bborder, dcol = p1_fill, p1_border, p1_text_col
+        elif winner == 2:
+            p2_cat_wins += 1
+            bfill, bborder, dcol = p2_fill, p2_border, p2_text_col
+        else:
+            bfill, bborder, dcol = tie_fill, tie_border, (180, 180, 180)
+
+        base = draw_rounded_rect(base, [(x1, y1), (x2, y2)], 16, bfill, bborder, 3)
+        box_renders.append((x1, y1, x2, y2, item["title"], v1_str, v2_str, diff_str, dcol))
+
+    # 4. Barra Riepilogativa in Basso (Stile Mineplex)
+    bar_fill = p1_fill if p1_cat_wins > p2_cat_wins else (p2_fill if p2_cat_wins > p1_cat_wins else tie_fill)
+    bar_border = p1_border if p1_cat_wins > p2_cat_wins else (p2_border if p2_cat_wins > p1_cat_wins else tie_border)
+    base = draw_rounded_rect(base, [(295, 530), (905, 615)], 16, bar_fill, bar_border, 3)
+
+    # 5. Disegno di tutti i Testi
     draw = ImageDraw.Draw(base)
-    
-    # Titolo Principale in Giallo/Oro Acceso
-    draw_text_with_shadow(draw, "STAT COMPARISON • SPEED BUILDERS", (550, 45), font_size=38, color=(255, 220, 50))
-    
-    # --- TESTI PLAYER 1 (SINISTRA) ---
-    draw_text_with_shadow(draw, p1_name, (170, 130), font_size=38, color=(255, 60, 60))
-    grado_p1 = pulisci_grado(stats['p1_rank'])
-    draw_text_with_shadow(draw, f"RANK: {grado_p1}", (170, 175), font_size=20, color=(240, 240, 240))
-    
-    # --- TESTI PLAYER 2 (DESTRA) ---
-    draw_text_with_shadow(draw, p2_name, (930, 130), font_size=38, color=(80, 180, 255))
-    grado_p2 = pulisci_grado(stats['p2_rank'])
-    draw_text_with_shadow(draw, f"RANK: {grado_p2}", (930, 175), font_size=20, color=(240, 240, 240))
 
-    # --- TESTI CENTRALI ---
-    for box in boxes:
-        draw_text_with_shadow(draw, box['title'], (550, box['y'] + 22), font_size=24, color=(255, 255, 255))
-        draw_text_with_shadow(draw, box['v1'], (420, box['y'] + 56), font_size=34, color=(255, 60, 60))
-        draw_text_with_shadow(draw, "/", (550, box['y'] + 56), font_size=28, color=(200, 200, 200))
-        draw_text_with_shadow(draw, box['v2'], (680, box['y'] + 56), font_size=34, color=(80, 180, 255))
+    # Titolo in alto
+    draw_centered_text(draw, "Stat Comparison · Speed Builders", (W // 2, 35), size=32, color=(255, 200, 70), bold=True)
 
-    # --- INSERIMENTO SKIN 3D ---
-    skin1 = await get_player_body(p1_name)
-    skin2 = await get_player_body(p2_name)
-    
-    largh_max = 200
-    s1_w = largh_max
-    s1_h = int((largh_max / skin1.width) * skin1.height)
-    skin1 = skin1.resize((s1_w, s1_h))
+    # Nomi Player in alto nei box laterali (ridimensiona automaticamente se il nick è lunghissimo)
+    s_p1 = 26 if len(p1_name) <= 12 else 21
+    s_p2 = 26 if len(p2_name) <= 12 else 21
+    draw_centered_text(draw, p1_name, (150, 115), size=s_p1, color=p1_text_col, bold=True)
+    draw_centered_text(draw, p2_name, (1050, 115), size=s_p2, color=p2_text_col, bold=True)
 
-    s2_w = largh_max
-    s2_h = int((largh_max / skin2.width) * skin2.height)
-    skin2 = skin2.resize((s2_w, s2_h))
+    # Ruoli / Gradi in basso sotto le skin
+    rank1_clean = pulisci_grado(stats["p1_rank"])
+    rank2_clean = pulisci_grado(stats["p2_rank"])
+    draw_centered_text(draw, rank1_clean, (150, 540), size=22, color=(255, 215, 0), bold=True)
+    draw_centered_text(draw, f"({stats['p1_wr']} WRs)", (150, 575), size=17, color=(220, 220, 220), bold=False)
 
-    # Ancoriamo le skin esattamente in basso nei loro box
-    p1_x = int(30 + (280 - s1_w) / 2)
-    p1_y = 560 - s1_h  
+    draw_centered_text(draw, rank2_clean, (1050, 540), size=22, color=(255, 215, 0), bold=True)
+    draw_centered_text(draw, f"({stats['p2_wr']} WRs)", (1050, 575), size=17, color=(220, 220, 220), bold=False)
 
-    p2_x = int(790 + (280 - s2_w) / 2)
-    p2_y = 560 - s2_h
+    # Testi dentro i 9 Box Centrali
+    for (x1, y1, x2, y2, title, v1_str, v2_str, diff_str, dcol) in box_renders:
+        cx = (x1 + x2) // 2
+        draw_centered_text(draw, title, (cx, y1 + 28), size=17, color=(235, 235, 235), bold=False)
+        draw_split_values(draw, v1_str, v2_str, (cx, y1 + 68), size=24, c1=p1_text_col, c2=p2_text_col)
+        draw_centered_text(draw, diff_str, (cx, y1 + 108), size=18, color=dcol, bold=True)
 
-    # Applica un'ombra dietro le skin per farle risaltare
-    ombra1 = Image.new("RGBA", skin1.size, (0, 0, 0, 150))
-    ombra2 = Image.new("RGBA", skin2.size, (0, 0, 0, 150))
-    base.paste(ombra1, (p1_x + 5, p1_y + 5), skin1)
-    base.paste(ombra2, (p2_x + 5, p2_y + 5), skin2)
-
-    # Incolla le skin reali
-    base.paste(skin1, (p1_x, p1_y), skin1)
-    base.paste(skin2, (p2_x, p2_y), skin2)
+    # Testi Barra Finale in Basso
+    draw_centered_text(draw, p1_name, (405, 572), size=22, color=p1_text_col, bold=True)
+    draw_split_values(draw, str(p1_cat_wins), str(p2_cat_wins), (600, 572), size=32, c1=p1_text_col, c2=p2_text_col)
+    draw_centered_text(draw, p2_name, (795, 572), size=22, color=p2_text_col, bold=True)
 
     buffer = io.BytesIO()
     base.save(buffer, format="PNG")
