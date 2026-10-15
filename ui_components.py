@@ -7,7 +7,6 @@ from database_utils import get_main_name, get_wr_count, get_sim_wr_link
 import time
 import aiohttp
 import database_utils
-import ui_components
 
 # --- MODAL PER IL LINK IMGUR ---
 class ImgurModal(Modal, title="Inserisci Link Imgur"):
