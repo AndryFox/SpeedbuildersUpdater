@@ -351,7 +351,7 @@ class RankingCommands(commands.Cog):
         await interaction.followup.send(file=file, ephemeral=True)
 
 # --- COMANDO 5: /bounties (OLDEST UNBROKEN WRs) ---
-    @app_commands.command(name="bounties", description="🎯 View the oldest unbroken World Records (Bounty Board)")
+    @app_commands.command(name="bounties", description="View the oldest unbroken World Records (Bounty Board)")
     async def bounties_cmd(self, interaction: discord.Interaction):
         if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
             return await interaction.response.send_message(f"⚠ Can only be used in <#{config.SUBMISSION_CHANNEL_ID}>.", ephemeral=True)
@@ -368,7 +368,7 @@ class RankingCommands(commands.Cog):
         if not rows:
             return await interaction.followup.send("📭 No World Records found in the database.", ephemeral=True)
 
-        # Raggruppiamo per build (se un WR è in pareggio, teniamo la data di chi lo ha fatto per primo!)
+        # Raggruppiamo per build salvando il timestamp di ciascun giocatore
         builds = {}
         for r in rows:
             b_key = r['build_name'].lower().strip()
@@ -380,28 +380,49 @@ class RankingCommands(commands.Cog):
                 builds[b_key] = {
                     'name': r['build_name'],
                     'time': r['time'],
-                    'holders': [p_disp],
-                    'ts': ts
+                    'holders': {p_disp: ts}
                 }
             else:
-                if p_disp not in builds[b_key]['holders']:
-                    builds[b_key]['holders'].append(p_disp)
-                if ts < builds[b_key]['ts']:
-                    builds[b_key]['ts'] = ts
+                # Se lo stesso giocatore compare più volte, teniamo la sua data più vecchia
+                if p_disp not in builds[b_key]['holders'] or ts < builds[b_key]['holders'][p_disp]:
+                    builds[b_key]['holders'][p_disp] = ts
 
-        # Ordiniamo dal più VECCHIO (timestamp più piccolo) al più recente
-        sorted_bounties = sorted(builds.values(), key=lambda x: (x['ts'], x['name'].lower()))
+        # Calcoliamo il primo giocatore (o i primi se hanno esattamente lo stesso timestamp) per ogni build
+        bounty_list = []
+        for b_key, b_data in builds.items():
+            # Ordiniamo i detentori dal primo che lo ha fatto (timestamp minore) all'ultimo
+            sorted_holders = sorted(b_data['holders'].items(), key=lambda x: x[1])
+            min_ts = sorted_holders[0][1]
+            first_setters = [p for p, t in sorted_holders if t == min_ts]
+
+            bounty_list.append({
+                'name': b_data['name'],
+                'time': b_data['time'],
+                'all_holders': [p for p, _ in sorted_holders],
+                'first_setters': first_setters,
+                'ts': min_ts
+            })
+
+        # Ordiniamo le build dalla più VECCHIA alla più recente
+        sorted_bounties = sorted(bounty_list, key=lambda x: (x['ts'], x['name'].lower()))
 
         lines = []
         for idx, b in enumerate(sorted_bounties, 1):
-            holders_str = " / ".join(b['holders'])
+            holders_str = " / ".join(b['all_holders'])
+            first_str = " / ".join(b['first_setters'])
             medal = "💀" if idx == 1 else ("🔥" if idx <= 3 else f"`#{idx}`")
+
+            # Se il record è condiviso da più persone, specifichiamo chi lo ha stabilito per primo!
+            if len(b['all_holders']) > 1:
+                sub_line = f"╰ *First set by **{first_str}** on <t:{b['ts']}:d> (<t:{b['ts']}:R>)*"
+            else:
+                sub_line = f"╰ *Unbroken since <t:{b['ts']}:d> (<t:{b['ts']}:R>)*"
+
             lines.append(
                 f"{medal} **{b['name']}** — `{b['time']}s` by **{holders_str}**\n"
-                f"╰ *Unbroken since <t:{b['ts']}:d> (<t:{b['ts']}:R>)*"
+                f"{sub_line}"
             )
 
-        # Dividiamo in pagine da 10 build ciascuna per una lettura super pulita
         per_page = 10
         chunks = [lines[i:i + per_page] for i in range(0, len(lines), per_page)]
         icon_url = self.bot.user.avatar.url if self.bot.user.avatar else None
@@ -420,6 +441,5 @@ class RankingCommands(commands.Cog):
             await interaction.followup.send(embed=pages[0], ephemeral=True)
         else:
             await interaction.followup.send(embed=pages[0], view=ui_components.PaginationView(pages), ephemeral=True)
-
 async def setup(bot):
     await bot.add_cog(RankingCommands(bot))
