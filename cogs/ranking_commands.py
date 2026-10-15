@@ -349,6 +349,77 @@ class RankingCommands(commands.Cog):
         image_buffer = await image_generator.generate_compare_gui(p1_estetico, p2_estetico, stats_data)
         file = discord.File(fp=image_buffer, filename="compare.png")
         await interaction.followup.send(file=file, ephemeral=True)
-        
+
+# --- COMANDO 5: /bounties (OLDEST UNBROKEN WRs) ---
+    @app_commands.command(name="bounties", description="🎯 View the oldest unbroken World Records (Bounty Board)")
+    async def bounties_cmd(self, interaction: discord.Interaction):
+        if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
+            return await interaction.response.send_message(f"⚠ Can only be used in <#{config.SUBMISSION_CHANNEL_ID}>.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+
+        async with database_utils.pool.acquire() as conn:
+            query = """
+                SELECT r1.build_name, r1.time, r1.player_name, EXTRACT(EPOCH FROM r1.date_added)::BIGINT AS ts
+                FROM WorldRecords r1
+                WHERE r1.time = (SELECT MIN(time) FROM WorldRecords r2 WHERE LOWER(r1.build_name) = LOWER(r2.build_name))
+            """
+            rows = await conn.fetch(query)
+
+        if not rows:
+            return await interaction.followup.send("📭 No World Records found in the database.", ephemeral=True)
+
+        # Raggruppiamo per build (se un WR è in pareggio, teniamo la data di chi lo ha fatto per primo!)
+        builds = {}
+        for r in rows:
+            b_key = r['build_name'].lower().strip()
+            p_norm = database_utils.get_main_name(r['player_name'])
+            p_disp = rankings.DISPLAY_NAMES_CACHE.get(p_norm, p_norm).replace("_", "\\_")
+            ts = r['ts'] or int(time.time())
+
+            if b_key not in builds:
+                builds[b_key] = {
+                    'name': r['build_name'],
+                    'time': r['time'],
+                    'holders': [p_disp],
+                    'ts': ts
+                }
+            else:
+                if p_disp not in builds[b_key]['holders']:
+                    builds[b_key]['holders'].append(p_disp)
+                if ts < builds[b_key]['ts']:
+                    builds[b_key]['ts'] = ts
+
+        # Ordiniamo dal più VECCHIO (timestamp più piccolo) al più recente
+        sorted_bounties = sorted(builds.values(), key=lambda x: (x['ts'], x['name'].lower()))
+
+        lines = []
+        for idx, b in enumerate(sorted_bounties, 1):
+            holders_str = " / ".join(b['holders'])
+            medal = "💀" if idx == 1 else ("🔥" if idx <= 3 else f"`#{idx}`")
+            lines.append(
+                f"{medal} **{b['name']}** — `{b['time']}s` by **{holders_str}**\n"
+                f"╰ *Unbroken since <t:{b['ts']}:d> (<t:{b['ts']}:R>)*"
+            )
+
+        # Dividiamo in pagine da 10 build ciascuna per una lettura super pulita
+        per_page = 10
+        chunks = [lines[i:i + per_page] for i in range(0, len(lines), per_page)]
+        icon_url = self.bot.user.avatar.url if self.bot.user.avatar else None
+
+        pages = []
+        for chunk in chunks:
+            embed = discord.Embed(
+                title="🎯 SpeedBuilders Bounty Board (Oldest WRs)",
+                description="Here are the longest-standing World Records waiting to be beaten:\n\n" + "\n\n".join(chunk),
+                color=discord.Color.dark_red()
+            )
+            embed.set_footer(text="FearGames Speedbuilders • Beat these records to claim the bounty!", icon_url=icon_url)
+            pages.append(embed)
+
+        if len(pages) == 1:
+            await interaction.followup.send(embed=pages[0], ephemeral=True)
+        else:
+            await interaction.followup.send(embed=pages[0], view=ui_components.PaginationView(pages), ephemeral=True)
+
 async def setup(bot):
     await bot.add_cog(RankingCommands(bot))
