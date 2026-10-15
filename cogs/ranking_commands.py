@@ -236,19 +236,19 @@ class RankingCommands(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 # --- COMANDO 4: /compare (TESTA A TESTA CON GUI) ---
-    @app_commands.command(name="compare", description="⚔️ Confronta le statistiche e i tempi di due giocatori")
-    @app_commands.describe(player1="Il primo giocatore", player2="Il secondo giocatore")
-    @app_commands.autocomplete(player1=player_autocomplete, player2=player_autocomplete)
-    async def compare_cmd(self, interaction: discord.Interaction, player1: str, player2: str):
+    @app_commands.command(name="compare", description="⚔️ Compare stats and times of two players")
+    @app_commands.describe(ign1="The first player", ign2="The second player")
+    @app_commands.autocomplete(ign1=player_autocomplete, ign2=player_autocomplete)
+    async def compare_cmd(self, interaction: discord.Interaction, ign1: str, ign2: str):
         if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
             return await interaction.response.send_message(f"⚠ Can only be used in <#{config.SUBMISSION_CHANNEL_ID}>.", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
             
-        p1_norm = database_utils.get_main_name(player1.replace("\\", ""))
-        p2_norm = database_utils.get_main_name(player2.replace("\\", ""))
+        p1_norm = database_utils.get_main_name(ign1.replace("\\", ""))
+        p2_norm = database_utils.get_main_name(ign2.replace("\\", ""))
         
         if p1_norm.lower() == p2_norm.lower():
-            return await interaction.followup.send("❌ Devi selezionare due giocatori diversi!", ephemeral=True)
+            return await interaction.followup.send("❌ You must select two different players!", ephemeral=True)
             
         p1_wr_count, p2_wr_count = 0, 0
         p1_solo, p2_solo = 0, 0
