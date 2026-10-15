@@ -117,7 +117,7 @@ class AdminCommands(commands.Cog):
             f"Rimosso collegamento alias '{vecchio_nome}' (era unito a '{target_new_name}')"
         )
 
-    # --- 4. COMANDO LIST ALIASES ---
+    # --- 4. COMANDO LIST ALIASES (CON PAGINAZIONE) ---
     @app_commands.command(name="list_aliases", description="📜 Mostra tutti gli alias attualmente registrati (Solo Admin)")
     @app_commands.default_permissions(administrator=True)
     async def list_aliases(self, interaction: discord.Interaction):
@@ -129,7 +129,7 @@ class AdminCommands(commands.Cog):
         grouped = {}
         for old_n, new_n in database_utils.ALIASES_CACHE.items():
             if old_n == new_n.lower():
-                continue # Ignoriamo le righe di sicurezza delle maiuscole per tenere la lista pulita
+                continue
             grouped.setdefault(new_n, []).append(old_n)
 
         if not grouped:
@@ -140,16 +140,22 @@ class AdminCommands(commands.Cog):
             olds = ", ".join(f"`{o}`" for o in sorted(grouped[main_player]))
             lines.append(f"▸ **{main_player}** ⬅️ {olds}")
 
-        testo = "\n".join(lines)
-        if len(testo) > 3900:
-            testo = testo[:3900] + "\n\n*... (limite caratteri raggiunto)*"
+        per_page = 20
+        chunks = [lines[i:i + per_page] for i in range(0, len(lines), per_page)]
+        
+        pages = []
+        for chunk in chunks:
+            embed = discord.Embed(
+                title=f"🔄 Alias Registrati ({len(grouped)} giocatori principali)",
+                description="\n".join(chunk),
+                color=discord.Color.blurple()
+            )
+            pages.append(embed)
 
-        embed = discord.Embed(
-            title=f"🔄 Alias Registrati ({len(grouped)} giocatori principali)",
-            description=testo,
-            color=discord.Color.blurple()
-        )
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        if len(pages) == 1:
+            await interaction.followup.send(embed=pages[0], ephemeral=True)
+        else:
+            await interaction.followup.send(embed=pages[0], view=ui_components.PaginationView(pages), ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(AdminCommands(bot))
