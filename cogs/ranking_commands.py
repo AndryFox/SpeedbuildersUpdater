@@ -234,5 +234,106 @@ class RankingCommands(commands.Cog):
         embed.set_footer(text="FearGames Speedbuilders", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+# --- COMANDO 4: /compare (TESTA A TESTA) ---
+    @app_commands.command(name="compare", description="⚔️ Confronta le statistiche e i tempi di due giocatori")
+    @app_commands.describe(player1="Il primo giocatore", player2="Il secondo giocatore")
+    @app_commands.autocomplete(player1=player_autocomplete, player2=player_autocomplete)
+    async def compare_cmd(self, interaction: discord.Interaction, player1: str, player2: str):
+        if interaction.channel_id != config.SUBMISSION_CHANNEL_ID:
+            return await interaction.response.send_message(f"⚠ Can only be used in <#{config.SUBMISSION_CHANNEL_ID}>.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+            
+        p1_norm = database_utils.get_main_name(player1.replace("\\", ""))
+        p2_norm = database_utils.get_main_name(player2.replace("\\", ""))
+        
+        if p1_norm.lower() == p2_norm.lower():
+            return await interaction.followup.send("❌ Devi selezionare due giocatori diversi!", ephemeral=True)
+            
+        p1_wr_count = 0
+        p2_wr_count = 0
+        p1_best = {}
+        p2_best = {}
+        
+        async with database_utils.pool.acquire() as conn:
+            # 1. Conta i WR attivi di entrambi
+            wr_query = """
+                SELECT r1.build_name, r1.time, r1.player_name FROM WorldRecords r1
+                WHERE r1.time = (SELECT MIN(time) FROM WorldRecords r2 WHERE LOWER(r1.build_name) = LOWER(r2.build_name))
+            """
+            for row in await conn.fetch(wr_query):
+                main_p = database_utils.get_main_name(row['player_name']).lower()
+                if main_p == p1_norm.lower(): p1_wr_count += 1
+                if main_p == p2_norm.lower(): p2_wr_count += 1
+                
+            # 2. Raccoglie i record personali assoluti su OGNI build per calcolare il Testa a Testa
+            all_rows = await conn.fetch("SELECT build_name, player_name, time FROM WorldRecords")
+            for row in all_rows:
+                b_name = row['build_name'].lower().strip()
+                m_name = database_utils.get_main_name(row['player_name']).lower()
+                t_val = row['time']
+                
+                if m_name == p1_norm.lower():
+                    if b_name not in p1_best or t_val < p1_best[b_name]:
+                        p1_best[b_name] = t_val
+                elif m_name == p2_norm.lower():
+                    if b_name not in p2_best or t_val < p2_best[b_name]:
+                        p2_best[b_name] = t_val
+
+        # --- LOGICA TESTA A TESTA ---
+        common_builds = set(p1_best.keys()).intersection(set(p2_best.keys()))
+        p1_wins = 0
+        p2_wins = 0
+        ties = 0
+        
+        for b in common_builds:
+            if p1_best[b] < p2_best[b]: p1_wins += 1
+            elif p2_best[b] < p1_best[b]: p2_wins += 1
+            else: ties += 1
+            
+        # --- TROFEI ---
+        p1_trophies = await database_utils.get_player_trophies(p1_norm)
+        p2_trophies = await database_utils.get_player_trophies(p2_norm)
+        
+        # --- DESIGN DELL'EMBED ---
+        embed = discord.Embed(title=f"⚔️ {p1_norm} 🆚 {p2_norm}", color=discord.Color.orange())
+        
+        p1_rank = rankings.get_role_tag(p1_wr_count)
+        p2_rank = rankings.get_role_tag(p2_wr_count)
+        
+        # Nomi estetici (Rispetta le maiuscole originali)
+        p1_estetico = rankings.DISPLAY_NAMES_CACHE.get(p1_norm, p1_norm)
+        p2_estetico = rankings.DISPLAY_NAMES_CACHE.get(p2_norm, p2_norm)
+        
+        # Colonna 1: Player 1
+        p1_text = f"**WR Attivi:** {p1_wr_count}\n**Grado:** {p1_rank}\n"
+        if common_builds: p1_text += f"**Scontri Vinti:** {p1_wins} 🏆"
+        embed.add_field(name=f"🔵 {p1_estetico}", value=p1_text, inline=True)
+        
+        # Colonna 2: Statistiche Head-to-Head (al centro)
+        h2h_text = f"**Build in comune:** {len(common_builds)}\n"
+        if common_builds:
+            h2h_text += f"**Pareggi:** {ties} 🤝"
+        else:
+            h2h_text += "*Nessuno scontro*"
+        embed.add_field(name="⚖️ Scontri Diretti", value=h2h_text, inline=True)
+        
+        # Colonna 3: Player 2
+        p2_text = f"**WR Attivi:** {p2_wr_count}\n**Grado:** {p2_rank}\n"
+        if common_builds: p2_text += f"**Scontri Vinti:** {p2_wins} 🏆"
+        embed.add_field(name=f"🔴 {p2_estetico}", value=p2_text, inline=True)
+        
+        # Riga inferiore: Trofei dei Tornei (Solo se almeno uno ne possiede)
+        if p1_trophies or p2_trophies:
+            t1_str = "\n".join(p1_trophies) if p1_trophies else "*Nessun trofeo*"
+            t2_str = "\n".join(p2_trophies) if p2_trophies else "*Nessun trofeo*"
+            embed.add_field(name=f"Bacheca {p1_estetico}", value=t1_str, inline=True)
+            embed.add_field(name="〰️", value=" ", inline=True) # Spazio per mantenere l'impaginazione a 3 colonne
+            embed.add_field(name=f"Bacheca {p2_estetico}", value=t2_str, inline=True)
+            
+        icon_url = interaction.client.user.avatar.url if interaction.client.user.avatar else None
+        embed.set_footer(text="FearGames Speedbuilders • H2H Stats", icon_url=icon_url)
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
 async def setup(bot):
     await bot.add_cog(RankingCommands(bot))
