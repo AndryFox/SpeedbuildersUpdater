@@ -194,7 +194,7 @@ async def generate_compare_gui(p1_name, p2_name, stats):
 
         v1, v2 = item["v1"], item["v2"]
         winner = 0
-        diff_str = "PARI"
+        diff_str = "TIE"
 
         if item["fmt"] == "time":
             if v1 > 0 and v2 > 0:
