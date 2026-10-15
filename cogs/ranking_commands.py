@@ -5,6 +5,7 @@ import aiohttp
 import re
 import config
 import database_utils
+import image_generator
 
 # Importiamo la tua libreria principale!
 import rankings 
@@ -294,46 +295,34 @@ class RankingCommands(commands.Cog):
         p1_trophies = await database_utils.get_player_trophies(p1_norm)
         p2_trophies = await database_utils.get_player_trophies(p2_norm)
         
-        # --- DESIGN DELL'EMBED ---
-        embed = discord.Embed(title=f"⚔️ {p1_norm} 🆚 {p2_norm}", color=discord.Color.orange())
+        # --- CALCOLO PERCENTUALE DOMINIO ---
+        tot_scontri = p1_wins + p2_wins
+        p1_perc = round((p1_wins / tot_scontri) * 100) if tot_scontri > 0 else 0
+        p2_perc = round((p2_wins / tot_scontri) * 100) if tot_scontri > 0 else 0
+
+        # --- PREPARIAMO I DATI PER L'IMMAGINE ---
+        stats_data = {
+            'p1_wr': p1_wr_count,
+            'p2_wr': p2_wr_count,
+            'p1_wins': p1_wins,
+            'p2_wins': p2_wins,
+            'ties': ties,
+            'p1_trofei': len(p1_trophies),
+            'p2_trofei': len(p2_trophies),
+            'p1_rank': rankings.get_role_tag(p1_wr_count),
+            'p2_rank': rankings.get_role_tag(p2_wr_count),
+            'p1_perc': p1_perc,
+            'p2_perc': p2_perc
+        }
         
-        p1_rank = rankings.get_role_tag(p1_wr_count)
-        p2_rank = rankings.get_role_tag(p2_wr_count)
-        
-        # Nomi estetici (Rispetta le maiuscole originali)
+        # --- GENERIAMO L'IMMAGINE GUI ---
         p1_estetico = rankings.DISPLAY_NAMES_CACHE.get(p1_norm, p1_norm)
         p2_estetico = rankings.DISPLAY_NAMES_CACHE.get(p2_norm, p2_norm)
         
-        # Colonna 1: Player 1
-        p1_text = f"**WR Attivi:** {p1_wr_count}\n**Grado:** {p1_rank}\n"
-        if common_builds: p1_text += f"**Scontri Vinti:** {p1_wins} 🏆"
-        embed.add_field(name=f"🔵 {p1_estetico}", value=p1_text, inline=True)
+        image_buffer = await image_generator.generate_compare_gui(p1_estetico, p2_estetico, stats_data)
+        file = discord.File(fp=image_buffer, filename="compare.png")
         
-        # Colonna 2: Statistiche Head-to-Head (al centro)
-        h2h_text = f"**Build in comune:** {len(common_builds)}\n"
-        if common_builds:
-            h2h_text += f"**Pareggi:** {ties} 🤝"
-        else:
-            h2h_text += "*Nessuno scontro*"
-        embed.add_field(name="⚖️ Scontri Diretti", value=h2h_text, inline=True)
+        await interaction.followup.send(file=file, ephemeral=True)
         
-        # Colonna 3: Player 2
-        p2_text = f"**WR Attivi:** {p2_wr_count}\n**Grado:** {p2_rank}\n"
-        if common_builds: p2_text += f"**Scontri Vinti:** {p2_wins} 🏆"
-        embed.add_field(name=f"🔴 {p2_estetico}", value=p2_text, inline=True)
-        
-        # Riga inferiore: Trofei dei Tornei (Solo se almeno uno ne possiede)
-        if p1_trophies or p2_trophies:
-            t1_str = "\n".join(p1_trophies) if p1_trophies else "*Nessun trofeo*"
-            t2_str = "\n".join(p2_trophies) if p2_trophies else "*Nessun trofeo*"
-            embed.add_field(name=f"Bacheca {p1_estetico}", value=t1_str, inline=True)
-            embed.add_field(name="〰️", value=" ", inline=True) # Spazio per mantenere l'impaginazione a 3 colonne
-            embed.add_field(name=f"Bacheca {p2_estetico}", value=t2_str, inline=True)
-            
-        icon_url = interaction.client.user.avatar.url if interaction.client.user.avatar else None
-        embed.set_footer(text="FearGames Speedbuilders • H2H Stats", icon_url=icon_url)
-        
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
 async def setup(bot):
     await bot.add_cog(RankingCommands(bot))
