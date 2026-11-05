@@ -826,3 +826,17 @@ async def check_and_update_uuid_alias(player_name: str):
                 "INSERT INTO player_uuids (uuid, main_name) VALUES ($1, $2)",
                 uuid, player_name.strip()
             )
+
+async def get_name_from_uuid(uuid_str: str):
+    """Interroga l'API di Mojang per ottenere il nome attuale a partire da un UUID."""
+    async with aiohttp.ClientSession() as session:
+        try:
+            # L'endpoint corretto di Mojang per convertire UUID -> Nome
+            url = f"https://sessionserver.mojang.com/session/minecraft/profile/{uuid_str}"
+            async with session.get(url, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("name")
+        except Exception as e:
+            print(f"⚠️ Errore API Mojang per UUID {uuid_str}: {e}")
+    return None
