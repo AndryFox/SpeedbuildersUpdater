@@ -184,5 +184,52 @@ class AdminCommands(commands.Cog):
         
         await interaction.followup.send(f"✅ Sincronizzazione completata! Caricati {len(database_utils.ALIASES_CACHE)} alias nella memoria.", ephemeral=True)
 
+    # --- 6. COMANDO SCAN UUID MANUALE ---
+    @app_commands.command(name="scan_uuids", description="🔍 Forza la scansione immediata degli UUID da Mojang (Solo Admin)")
+    @app_commands.default_permissions(administrator=True)
+    async def scan_uuids(self, interaction: discord.Interaction):
+        if interaction.user.id != config.MIO_ID:
+            return await interaction.response.send_message("❌ Accesso negato.", ephemeral=True)
+
+        # Rispondiamo subito per evitare che Discord dia "L'applicazione non risponde"
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send("⏳ Avvio scansione UUID su Mojang in corso... (potrebbe richiedere qualche minuto a seconda di quanti UUID ci sono, ti avviso io quando ho finito!)", ephemeral=True)
+
+        async with database_utils.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT uuid, main_name FROM player_uuids")
+        
+        changes_made = False
+        cambi_rilevati = []
+        
+        for row in rows:
+            uuid = row['uuid']
+            old_main_name = row['main_name']
+            
+            # Interroga Mojang
+            current_name = await database_utils.get_name_from_uuid(uuid)
+            
+            if current_name and current_name.lower() != old_main_name.lower():
+                async with database_utils.pool.acquire() as conn:
+                    # 1. Aggiorna UUID
+                    await conn.execute("UPDATE player_uuids SET main_name = $1 WHERE uuid = $2", current_name, uuid)
+                    # 2. Crea Alias automatico
+                    await conn.execute(
+                        "INSERT INTO Aliases (old_name, new_name) VALUES ($1, $2) ON CONFLICT (old_name) DO UPDATE SET new_name = $2",
+                        old_main_name.lower(), current_name
+                    )
+                changes_made = True
+                cambi_rilevati.append(f"`{old_main_name}` ➔ **{current_name}**")
+            
+            # Pausa fondamentale per non farsi bloccare da Mojang
+            await asyncio.sleep(1.5)
+            
+        if changes_made:
+            await database_utils.load_aliases()
+            await rankings.trigger_ranking_update(self.bot)
+            report = "\n".join(cambi_rilevati)
+            await interaction.followup.send(f"✅ **Scansione completata!** Trovati {len(cambi_rilevati)} cambi nome:\n{report}", ephemeral=True)
+        else:
+            await interaction.followup.send("✅ **Scansione completata!** Nessun giocatore nel database ha cambiato nome.", ephemeral=True)
+    
 async def setup(bot):
     await bot.add_cog(AdminCommands(bot))
