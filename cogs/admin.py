@@ -157,5 +157,21 @@ class AdminCommands(commands.Cog):
         else:
             await interaction.followup.send(embed=pages[0], view=ui_components.PaginationView(pages), ephemeral=True)
 
+    # --- 5. COMANDO RELOAD ALIASES ---
+    @app_commands.command(name="reload_aliases", description="🔄 Ricarica la cache degli alias da Supabase (Solo Admin)")
+    @app_commands.default_permissions(administrator=True)
+    async def reload_aliases(self, interaction: discord.Interaction):
+        if interaction.user.id != config.MIO_ID:
+            return await interaction.response.send_message("❌ Accesso negato.", ephemeral=True)
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        # Svuota la RAM e ricarica i dati freschi da Supabase
+        await database_utils.load_aliases()
+        # Aggiorna le classifiche pubbliche per applicare i nuovi nomi
+        await rankings.trigger_ranking_update(self.bot)
+        
+        await interaction.followup.send(f"✅ Sincronizzazione completata! Caricati {len(database_utils.ALIASES_CACHE)} alias nella memoria.", ephemeral=True)
+
 async def setup(bot):
     await bot.add_cog(AdminCommands(bot))
