@@ -54,49 +54,61 @@ class AdminCommands(commands.Cog):
 
         await interaction.followup.send(f"🥷 ✅ Operazione fantasma completata! Screenshot inviato in revisione per conto di {player.mention}.", ephemeral=True)
 
-    # --- 2. COMANDO ADD ALIAS ---
-    @app_commands.command(name="add_alias", description="🔧 Unisce i record di un vecchio nome al nuovo nome (Solo Admin)")
-    @app_commands.describe(vecchio_nome="Il nome vecchio (es. blaagoosb)", nuovo_nome="Il nome corretto (es. M2xD)")
+    # --- 2. COMANDO ADD ALIAS (SUPPORTO NOMI MULTIPLI) ---
+    @app_commands.command(name="add_alias", description="🔧 Unisce uno o più vecchi nomi al nuovo nome (Solo Admin)")
+    @app_commands.describe(vecchi_nomi="Nomi vecchi separati da virgola (es. m2xd, blaagoosb)", nuovo_nome="Il nome corretto (es. autoslot)")
     @app_commands.default_permissions(administrator=True)
-    async def add_alias(self, interaction: discord.Interaction, vecchio_nome: str, nuovo_nome: str):
+    async def add_alias(self, interaction: discord.Interaction, vecchi_nomi: str, nuovo_nome: str):
         if interaction.user.id != config.MIO_ID:
             return await interaction.response.send_message("❌ Accesso negato.", ephemeral=True)
 
         await interaction.response.defer(ephemeral=True)
-        v_name = vecchio_nome.lower().strip()
         nuovo_nome = nuovo_nome.strip()
-
-        # Recupera l'UUID del secondo account da Mojang
-        uuid = await database_utils.get_mojang_uuid(vecchio_nome.strip())
+        
+        # Separiamo la lista dei vecchi nomi usando la virgola e togliamo gli spazi inutili
+        lista_vecchi_nomi = [nome.strip().lower() for nome in vecchi_nomi.split(',') if nome.strip()]
 
         async with database_utils.pool.acquire() as conn:
-            # 1. Inserisce gli alias testuali classici
-            await conn.execute(
-                "INSERT INTO Aliases (old_name, new_name) VALUES ($1, $2) ON CONFLICT (old_name) DO UPDATE SET new_name = $2", 
-                v_name, nuovo_nome
-            )
-            n_name_lower = nuovo_nome.lower()
-            if v_name != n_name_lower:
+            for v_name in lista_vecchi_nomi:
+                # 1. Recupera l'UUID del vecchio/secondo account (se esiste)
+                uuid = await database_utils.get_mojang_uuid(v_name)
+
+                # 2. Inserisce gli alias testuali classici
                 await conn.execute(
                     "INSERT INTO Aliases (old_name, new_name) VALUES ($1, $2) ON CONFLICT (old_name) DO UPDATE SET new_name = $2", 
-                    n_name_lower, nuovo_nome
+                    v_name, nuovo_nome
                 )
-                
-            # 2. Lega l'UUID del secondo account al nome principale in modo permanente!
-            if uuid:
+                n_name_lower = nuovo_nome.lower()
+                if v_name != n_name_lower:
+                    await conn.execute(
+                        "INSERT INTO Aliases (old_name, new_name) VALUES ($1, $2) ON CONFLICT (old_name) DO UPDATE SET new_name = $2", 
+                        n_name_lower, nuovo_nome
+                    )
+                    
+                # 3. Lega l'UUID del secondo account al nome principale in modo permanente
+                if uuid:
+                    await conn.execute(
+                        "INSERT INTO player_uuids (uuid, main_name) VALUES ($1, $2) ON CONFLICT (uuid) DO UPDATE SET main_name = $2",
+                        uuid, nuovo_nome
+                    )
+                    
+            # 4. Assicuriamoci di legare anche l'UUID del nuovo nome in modo da blindarlo per il futuro
+            uuid_nuovo = await database_utils.get_mojang_uuid(nuovo_nome)
+            if uuid_nuovo:
                 await conn.execute(
                     "INSERT INTO player_uuids (uuid, main_name) VALUES ($1, $2) ON CONFLICT (uuid) DO UPDATE SET main_name = $2",
-                    uuid, nuovo_nome
+                    uuid_nuovo, nuovo_nome
                 )
 
         await database_utils.load_aliases()
         await rankings.trigger_ranking_update(self.bot)
            
-        await interaction.followup.send(f"✅ Identità unite! L'account/UUID `{vecchio_nome}` ora apparterrà per sempre a **{nuovo_nome}**.", ephemeral=True)
+        nomi_formattati = ", ".join(f"`{n}`" for n in lista_vecchi_nomi)
+        await interaction.followup.send(f"✅ Identità unite in blocco! Gli account/alias {nomi_formattati} ora apparterranno per sempre a **{nuovo_nome}**.", ephemeral=True)
         await database_utils.log_action(
             interaction.user.id, 
-            "ADD_ALIAS", 
-            f"Unito vecchio nome '{vecchio_nome}' nel nuovo nome '{nuovo_nome}'"
+            "ADD_ALIAS_MULTIPLE", 
+            f"Uniti vecchi nomi '{vecchi_nomi}' nel nuovo nome '{nuovo_nome}'"
         )
 
     # --- 3. COMANDO REMOVE ALIAS ---
