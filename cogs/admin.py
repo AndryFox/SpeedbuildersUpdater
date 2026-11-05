@@ -151,10 +151,15 @@ class AdminCommands(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         grouped = {}
-        for old_n, new_n in database_utils.ALIASES_CACHE.items():
-            if old_n == new_n.lower():
+        for old_n in database_utils.ALIASES_CACHE.keys():
+            # Troviamo il VERO padrone finale a fine catena
+            final_main = database_utils.get_main_name(old_n)
+            
+            # Se il nome è uguale a se stesso, lo ignoriamo
+            if old_n == final_main.lower():
                 continue
-            grouped.setdefault(new_n, []).append(old_n)
+                
+            grouped.setdefault(final_main, []).append(old_n)
 
         if not grouped:
             return await interaction.followup.send("📭 Nessun alias registrato al momento.", ephemeral=True)
@@ -163,23 +168,6 @@ class AdminCommands(commands.Cog):
         for main_player in sorted(grouped.keys(), key=lambda x: x.lower()):
             olds = ", ".join(f"`{o}`" for o in sorted(grouped[main_player]))
             lines.append(f"▸ **{main_player}** ⬅️ {olds}")
-
-        per_page = 20
-        chunks = [lines[i:i + per_page] for i in range(0, len(lines), per_page)]
-        
-        pages = []
-        for chunk in chunks:
-            embed = discord.Embed(
-                title=f"🔄 Alias Registrati ({len(grouped)} giocatori principali)",
-                description="\n".join(chunk),
-                color=discord.Color.blurple()
-            )
-            pages.append(embed)
-
-        if len(pages) == 1:
-            await interaction.followup.send(embed=pages[0], ephemeral=True)
-        else:
-            await interaction.followup.send(embed=pages[0], view=ui_components.PaginationView(pages), ephemeral=True)
 
     # --- 5. COMANDO RELOAD ALIASES ---
     @app_commands.command(name="reload_aliases", description="🔄 Ricarica la cache degli alias da Supabase (Solo Admin)")
