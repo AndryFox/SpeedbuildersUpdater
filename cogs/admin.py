@@ -169,6 +169,23 @@ class AdminCommands(commands.Cog):
             olds = ", ".join(f"`{o}`" for o in sorted(grouped[main_player]))
             lines.append(f"▸ **{main_player}** ⬅️ {olds}")
 
+        per_page = 20
+        chunks = [lines[i:i + per_page] for i in range(0, len(lines), per_page)]
+
+        pages = []
+        for chunk in chunks:
+            embed = discord.Embed(
+                title=f"🔄 Alias Registrati ({len(grouped)} giocatori principali)",
+                description="\n".join(chunk),
+                color=discord.Color.blurple()
+            )
+            pages.append(embed)
+
+        if len(pages) == 1:
+            await interaction.followup.send(embed=pages[0], ephemeral=True)
+        else:
+            await interaction.followup.send(embed=pages[0], view=ui_components.PaginationView(pages), ephemeral=True)
+
     # --- 5. COMANDO RELOAD ALIASES ---
     @app_commands.command(name="reload_aliases", description="🔄 Ricarica la cache degli alias da Supabase (Solo Admin)")
     @app_commands.default_permissions(administrator=True)
