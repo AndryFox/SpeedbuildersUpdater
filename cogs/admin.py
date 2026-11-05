@@ -65,7 +65,11 @@ class AdminCommands(commands.Cog):
         v_name = vecchio_nome.lower().strip()
         nuovo_nome = nuovo_nome.strip()
 
+        # Recupera l'UUID del secondo account da Mojang
+        uuid = await database_utils.get_mojang_uuid(vecchio_nome.strip())
+
         async with database_utils.pool.acquire() as conn:
+            # 1. Inserisce gli alias testuali classici
             await conn.execute(
                 "INSERT INTO Aliases (old_name, new_name) VALUES ($1, $2) ON CONFLICT (old_name) DO UPDATE SET new_name = $2", 
                 v_name, nuovo_nome
@@ -76,11 +80,18 @@ class AdminCommands(commands.Cog):
                     "INSERT INTO Aliases (old_name, new_name) VALUES ($1, $2) ON CONFLICT (old_name) DO UPDATE SET new_name = $2", 
                     n_name_lower, nuovo_nome
                 )
+                
+            # 2. Lega l'UUID del secondo account al nome principale in modo permanente!
+            if uuid:
+                await conn.execute(
+                    "INSERT INTO player_uuids (uuid, main_name) VALUES ($1, $2) ON CONFLICT (uuid) DO UPDATE SET main_name = $2",
+                    uuid, nuovo_nome
+                )
 
         await database_utils.load_aliases()
         await rankings.trigger_ranking_update(self.bot)
            
-        await interaction.followup.send(f"✅ Identità unite! Tutti i record passati e futuri di `{vecchio_nome}` apparterranno a **{nuovo_nome}**.", ephemeral=True)
+        await interaction.followup.send(f"✅ Identità unite! L'account/UUID `{vecchio_nome}` ora apparterrà per sempre a **{nuovo_nome}**.", ephemeral=True)
         await database_utils.log_action(
             interaction.user.id, 
             "ADD_ALIAS", 
