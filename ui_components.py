@@ -156,7 +156,13 @@ class WrRoundModal(Modal):
         try: new_rounds = int(self.rounds_val.value)
         except ValueError: new_rounds = 0
 
-        current_team = f"{self.winner_name.value.strip()} & {self.opponent_name.value.strip()}"
+        # --- NOVITÀ UUID: Controlliamo entrambi i giocatori! ---
+        w_name = self.winner_name.value.strip()
+        o_name = self.opponent_name.value.strip()
+        await database_utils.check_and_update_uuid_alias(w_name)
+        await database_utils.check_and_update_uuid_alias(o_name)
+
+        current_team = f"{w_name} & {o_name}"
         
         ts_input = self.timestamp_val.value.strip()
         if not ts_input: ts_input = str(int(time.time()))
@@ -365,6 +371,10 @@ class WRModal(Modal):
         
         build_key = self.build_name.value.strip()
         current_player = self.player_name.value.strip()
+        
+        # --- NOVITÀ UUID: Controlla se ha cambiato nome o se è nuovo! ---
+        await database_utils.check_and_update_uuid_alias(current_player)
+        
         current_norm = get_main_name(current_player)
         try: new_time = float(self.time_val.value.replace(',', '.'))
         except ValueError: new_time = 0.0
