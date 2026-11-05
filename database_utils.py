@@ -24,9 +24,20 @@ async def load_aliases():
     print(f"🔄 Caricati {len(ALIASES_CACHE)} alias dal database.")
 
 def get_main_name(player_name: str) -> str:
-    """Controlla se il giocatore ha un alias nella cache."""
-    lower_name = player_name.lower()
-    return ALIASES_CACHE.get(lower_name, player_name)
+    """Risolve gli alias a cascata (es. A -> B -> C restituisce in automatico C)."""
+    current_name = player_name
+    visitati = set() # Sicurezza anti-loop se per sbaglio A punta a B e B punta ad A
+    
+    while current_name.lower() in ALIASES_CACHE:
+        next_name = ALIASES_CACHE[current_name.lower()]
+        
+        if next_name.lower() == current_name.lower() or next_name.lower() in visitati:
+            break
+            
+        visitati.add(current_name.lower())
+        current_name = next_name
+        
+    return current_name
 
 async def get_wr_count(bot, player_name):
     target_name = get_main_name(player_name)
