@@ -1,6 +1,7 @@
 import re
 import config
 import asyncpg
+import aiohttp
 
 # --- POOL DI CONNESSIONI GLOBALE ---
 pool = None
@@ -788,3 +789,40 @@ async def get_player_trophies(player_name: str) -> list[str]:
             trophies.append(f"🥉 **{sigla} {ed}**")
             
     return trophies
+    
+async def get_mojang_uuid(player_name: str):
+    """Interroga l'API di Mojang per ottenere l'UUID univoco di un giocatore."""
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(f"https://api.mojang.com/users/profiles/minecraft/{player_name}", timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("id")
+        except Exception as e:
+            print(f"⚠️ Errore API Mojang per {player_name}: {e}")
+    return None
+
+async def check_and_update_uuid_alias(player_name: str):
+    """Controlla l'UUID. Se è nuovo lo salva, se esiste già e il nome è diverso, crea un alias automatico."""
+    uuid = await get_mojang_uuid(player_name.strip())
+    if not uuid:
+        return
+        
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT main_name FROM player_uuids WHERE uuid = $1", uuid)
+        if row:
+            stored_main = row['main_name']
+            # Se il nome digitato è diverso dal main_name registrato per questo UUID (Ha cambiato nome!)
+            if stored_main.lower() != player_name.strip().lower():
+                await conn.execute(
+                    "INSERT INTO Aliases (old_name, new_name) VALUES ($1, $2) ON CONFLICT (old_name) DO UPDATE SET new_name = $2",
+                    player_name.strip().lower(), stored_main
+                )
+                # Aggiorniamo la RAM in tempo reale senza ricaricare tutto il database
+                ALIASES_CACHE[player_name.strip().lower()] = stored_main
+        else:
+            # UUID mai visto prima: registriamolo come nuovo utente principale
+            await conn.execute(
+                "INSERT INTO player_uuids (uuid, main_name) VALUES ($1, $2)",
+                uuid, player_name.strip()
+            )
